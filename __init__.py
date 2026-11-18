@@ -28,7 +28,7 @@ from . import live_image, transport, window
 bl_info = {
     "name": "p5inBlender",
     "author": "DeepseekWorkzone",
-    "version": (0, 6, 0),
+    "version": (0, 7, 0),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > p5inBlender",
     "description": "Live 2D canvas as a UV-mapped texture, coded in Blender's text editor",
@@ -170,7 +170,8 @@ let trails = [];
 
 function sketch(p) {
   p.setup = function () {
-    p.createCanvas(640, 360);
+    const d = p.p5inblender || {};
+    p.createCanvas(d.w || 640, d.h || 360);   // 尺寸跟随实例设置
     p.frameRate(60);
     p.noStroke();
   };
@@ -313,6 +314,8 @@ def create_instance(name: str, port: int | None = None, with_plane: bool = True)
     rec.image = f"P5B_live_{name}"
     rec.material = f"P5B_Canvas_{name}"
     rec.plane = ""
+    rec.width = int(getattr(sc, "p5b_width", 640))
+    rec.height = int(getattr(sc, "p5b_height", 360))
     text = bpy.data.texts.get(rec.text) or bpy.data.texts.new(rec.text)
     if not text.as_string().strip():
         text.from_string(TEMPLATE)
@@ -337,7 +340,8 @@ def instance_start(rec, width: int | None = None, height: int | None = None) -> 
     rt = _new_runtime(rec.name)
     rt["server"] = srv
     rt["live"] = live_image.LiveImage(rec.image or f"P5B_live_{rec.name}",
-                                      int(width or sc.p5b_width), int(height or sc.p5b_height))
+                                      int(width or rec.width or sc.p5b_width),
+                                      int(height or rec.height or sc.p5b_height))
     text = bpy.data.texts.get(rec.text)
     if text is not None:
         rt["sketch_version"] += 1
@@ -414,10 +418,14 @@ def _pump():
     try:
         state = build_state(scene)
         st["state"] = state
-        payload = json.dumps(state)
         for rt in st["instances"].values():
-            if rt["server"] is not None:
-                rt["server"].publish_state(payload)
+            srv = rt["server"]
+            if srv is None:
+                continue
+            rec = instance_record(rt["name"])
+            w = int((rec.width if rec else 0) or scene.p5b_width)
+            h = int((rec.height if rec else 0) or scene.p5b_height)
+            srv.publish_state(json.dumps({**state, "w": w, "h": h}))
     except Exception as exc:
         st["error"] = f"state failed: {exc}"
 
@@ -548,11 +556,14 @@ def cook_frame(frame: int | None = None, timeout: float = 5.0) -> int:
     scene = bpy.context.scene
     target = scene.frame_current if frame is None else int(frame)
     scene.frame_set(target)
+    w = int((rec.width if rec else 0) or scene.p5b_width)
+    h = int((rec.height if rec else 0) or scene.p5b_height)
     state = build_state(scene)
+    state["w"] = w
+    state["h"] = h
     fps = max(scene.render.fps, 1)
     srv.clear_results()
-    cid = srv.request_cook(target, target / fps, state,
-                           int(scene.p5b_width), int(scene.p5b_height))
+    cid = srv.request_cook(target, target / fps, state, w, h)
     deadline = time.perf_counter() + timeout
     result = None
     while time.perf_counter() < deadline:
@@ -689,6 +700,34 @@ class P5B_OT_show_canvas(bpy.types.Operator):
         space = area.spaces.active
         space.image = rt["live"].image
         space.ui_mode = "VIEW"
+        return {"FINISHED"}
+
+
+class P5B_OT_bind_plane(bpy.types.Operator):
+    bl_idname = "p5b.bind_plane"
+    bl_label = "Bind Selected to Instance"
+    bl_description = "Give the selected meshes the active instance's canvas material"
+
+    def execute(self, context):
+        rec = active_record()
+        rt = _runtime(rec.name) if rec is not None else None
+        if rt is None or rt["live"] is None:
+            self.report({"ERROR"}, "start the instance first")
+            return {"CANCELLED"}
+        targets = [o for o in context.selected_objects if o.type == "MESH"]
+        if not targets:
+            self.report({"ERROR"}, "select a mesh object")
+            return {"CANCELLED"}
+        mat = window.build_material(rt["live"].image, rec.material or f"P5B_Canvas_{rec.name}")
+        for ob in targets:
+            data = ob.data
+            if not data.uv_layers:
+                data.uv_layers.new(name=window.UV_NAME)
+            if not data.materials:
+                data.materials.append(mat)
+            else:
+                data.materials[0] = mat
+        self.report({"INFO"}, f"bound {len(targets)} mesh(es) to {rec.name}")
         return {"FINISHED"}
 
 
@@ -832,6 +871,8 @@ class P5B_Instance(bpy.types.PropertyGroup):
     """Persistent record of one canvas: where its sketch, image and plane live."""
 
     port: bpy.props.IntProperty(name="Port", default=DEFAULT_PORT, min=1024, max=65535)
+    width: bpy.props.IntProperty(name="Width", default=0, min=0, max=4096)
+    height: bpy.props.IntProperty(name="Height", default=0, min=0, max=4096)
     text: bpy.props.StringProperty(name="Sketch", default="")
     image: bpy.props.StringProperty(name="Image", default="")
     material: bpy.props.StringProperty(name="Material", default="")
@@ -1003,6 +1044,7 @@ class P5B_PT_canvas(bpy.types.Panel):
         row = layout.row(align=True)
         row.operator("p5b.show_canvas", text="Show", icon="IMAGE_DATA")
         row.operator("p5b.create_window", text="Window Plane", icon="MESH_PLANE")
+        layout.operator("p5b.bind_plane", text="Bind Selected Mesh", icon="LINKED")
 
         row = layout.row(align=True)
         op = row.operator("p5b.open_host", text="Open", icon="WINDOW")
@@ -1123,6 +1165,7 @@ classes = (
     P5B_OT_start, P5B_OT_stop, P5B_OT_new_sketch, P5B_OT_run_sketch,
     P5B_OT_open_host, P5B_OT_close_host,
     P5B_OT_create_window, P5B_OT_show_canvas, P5B_OT_track, P5B_OT_untrack,
+    P5B_OT_bind_plane,
     P5B_OT_cook_still, P5B_OT_cook_render, P5B_OT_render_animation,
     P5B_OT_instance_new, P5B_OT_instance_activate, P5B_OT_instance_start,
     P5B_OT_instance_stop, P5B_OT_instance_remove,

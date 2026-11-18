@@ -85,6 +85,11 @@ function connect() {
     else if (msg.type === 'state') {
       lastState = msg;
       hud.objs.textContent = `objects: ${(msg.objects || []).length}`;
+      // 实例的分辨率变了就跟着调整画布
+      if (p5Instance && msg.w && msg.h &&
+          (p5Instance.width !== msg.w || p5Instance.height !== msg.h)) {
+        try { p5Instance.resizeCanvas(msg.w, msg.h); } catch (e) { console.error(e); }
+      }
     } else if (msg.type === 'cook') {
       if (msg.state) lastState = msg.state;
       pushStateToSketch(msg.t || 0);
@@ -145,7 +150,13 @@ function sendFrame(req, cv) {
 // ------------------------------------------------------------------- sketch
 function pushStateToSketch(t) {
   if (!p5Instance) return;
-  p5Instance.p5inblender = { state: lastState, t: t, frame: lastState.frame || 0 };
+  p5Instance.p5inblender = {
+    state: lastState,
+    t: t,
+    frame: lastState.frame || 0,
+    w: lastState.w || p5Instance.width,
+    h: lastState.h || p5Instance.height,
+  };
 }
 
 function destroySketch() {

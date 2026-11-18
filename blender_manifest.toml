@@ -6,7 +6,7 @@ tagline = "Live 2D canvas (p5.js / three.js) as a UV-mapped texture"
 maintainer = "DeepseekWorkzone"
 type = "add-on"
 
-version = "0.6.0"
+version = "0.7.0"
 
 blender_version_min = "4.2.0"
 

@@ -161,6 +161,22 @@ state.objects[] = { name, x, y, depth, visible }   // x/y 已归一化到 0..1
 实测：两个实例同时 60 fps；把第二个实例的 sketch 改成红底大圆点后，两块画面的 md5 不同，
 说明从 sketch 到材质完全隔离。
 
+### 每实例分辨率
+
+实例记录里带 `width` / `height`（新建时继承场景的 W/H，之后可改）。
+sketch 里用 `p.p5inblender.w / .h` 建画布，Blender 侧图像尺寸跟着实例走：
+
+```js
+p.createCanvas(p.p5inblender.w || 640, p.p5inblender.h || 360);
+```
+
+实测同一场景里 640×360 的两个实例和一个 320×180 的实例并存（约 51 / 55 / 55 fps）。
+
+### 一个实例贴到多个模型
+
+选中任意网格 → `Canvas` 面板 → `Bind Selected Mesh`，它会拿到活动实例的材质
+（没有 UV 会自动建一层）。同一个实例可以被任意多个物体共用。
+
 ## 默认后台运行（没有窗口）
 
 插件启用后不占任何资源；点一次 **Start**，三件事一起做：
