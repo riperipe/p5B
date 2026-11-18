@@ -29,7 +29,7 @@ from . import live_image, transport, window
 bl_info = {
     "name": "p5inBlender",
     "author": "DeepseekWorkzone",
-    "version": (0, 4, 0),
+    "version": (0, 4, 1),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > p5inBlender",
     "description": "Live 2D canvas as a UV-mapped texture, coded in Blender's text editor",
@@ -636,6 +636,23 @@ class P5B_OT_sync_params(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class P5B_OT_key_param(bpy.types.Operator):
+    bl_idname = "p5b.key_param"
+    bl_label = "Key Parameter"
+    bl_description = "Insert a keyframe for this parameter at the current frame"
+
+    name: bpy.props.StringProperty()
+
+    def execute(self, context):
+        sc = context.scene
+        path = keyframe_param(sc, self.name)
+        if not path:
+            self.report({"ERROR"}, f"could not keyframe {self.name}")
+            return {"CANCELLED"}
+        self.report({"INFO"}, f"keyed {self.name} at frame {sc.frame_current}")
+        return {"FINISHED"}
+
+
 class P5B_OT_keyframe_params(bpy.types.Operator):
     bl_idname = "p5b.keyframe_params"
     bl_label = "Keyframe Params"
@@ -947,16 +964,19 @@ class P5B_PT_params(bpy.types.Panel):
             layout.label(text="no // @param lines in sketch")
         group = sc.get(PARAM_ATTR) if PARAM_ATTR in sc else None
         for name in schema:
+            row = layout.row(align=True)
             if group is not None and name in group:
                 try:
-                    layout.prop(sc, f'{PARAM_ATTR}["{name}"]', text=name)
+                    row.prop(sc, f'{PARAM_ATTR}["{name}"]', text=name)
                 except Exception:
-                    layout.label(text=f"{name} · {group[name]:.3f}")
+                    row.label(text=f"{name} · {group[name]:.3f}")
             else:
-                layout.label(text=f"{name} · not synced")
+                row.label(text=f"{name} · not synced")
+            op = row.operator("p5b.key_param", text="", icon="KEY_HLT")
+            op.name = name
         row = layout.row(align=True)
         row.operator("p5b.sync_params", text="Sync", icon="FILE_REFRESH")
-        row.operator("p5b.keyframe_params", text="Key", icon="KEY_HLT")
+        row.operator("p5b.keyframe_params", text="Key All", icon="KEY_HLT")
 
 
 class P5B_PT_text_sidebar(bpy.types.Panel):
@@ -982,7 +1002,7 @@ classes = (
     P5B_OT_open_host, P5B_OT_close_host,
     P5B_OT_create_window, P5B_OT_show_canvas, P5B_OT_track, P5B_OT_untrack,
     P5B_OT_cook_still, P5B_OT_cook_render, P5B_OT_render_animation,
-    P5B_OT_sync_params, P5B_OT_keyframe_params,
+    P5B_OT_sync_params, P5B_OT_keyframe_params, P5B_OT_key_param,
     P5B_PT_panel, P5B_PT_canvas, P5B_PT_sketch, P5B_PT_tracking, P5B_PT_render, P5B_PT_params,
     P5B_PT_text_sidebar, P5B_MT_menu,
 )
