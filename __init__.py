@@ -20,6 +20,7 @@ import tempfile
 import time
 
 import bpy
+import numpy as np
 from mathutils import Vector
 from bpy_extras.object_utils import world_to_camera_view
 
@@ -28,7 +29,7 @@ from . import live_image, transport, window
 bl_info = {
     "name": "p5inBlender",
     "author": "DeepseekWorkzone",
-    "version": (0, 7, 0),
+    "version": (0, 8, 0),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > p5inBlender",
     "description": "Live 2D canvas as a UV-mapped texture, coded in Blender's text editor",
@@ -181,10 +182,23 @@ function sketch(p) {
     const state = ctxData.state || { objects: [] };
     const objs = state.objects || [];
 
-    // 半透明覆盖 = 拖尾
-    p.noStroke();
-    p.fill(8, 10, 18, 42);
-    p.rect(0, 0, p.width, p.height);
+    // 上游纹理（如果 Blender 那边设了 Texture / 点了 Feedback）
+    const tex = ctxData.texture;
+    if (tex) {
+      p.push();
+      p.translate(p.width / 2, p.height / 2);
+      p.rotate(0.0015 * (p.frameCount % 2000));
+      p.scale(0.996);
+      p.drawingContext.globalAlpha = 0.965;
+      p.drawingContext.drawImage(tex, -p.width / 2, -p.height / 2, p.width, p.height);
+      p.drawingContext.globalAlpha = 1;
+      p.pop();
+    } else {
+      // 半透明覆盖 = 拖尾
+      p.noStroke();
+      p.fill(8, 10, 18, 42);
+      p.rect(0, 0, p.width, p.height);
+    }
 
     objs.forEach((o, i) => {
       if (o.visible === false) return;
@@ -374,6 +388,17 @@ def instance_push(rec) -> int:
     return rt["sketch_version"]
 
 
+def image_to_rgba8(img):
+    """Blender image -> top-down RGBA8 bytes (what ImageData wants)."""
+    w, h = img.size
+    if not w or not h:
+        return None
+    src = np.empty(w * h * 4, dtype=np.float32)
+    img.pixels.foreach_get(src)
+    arr = (np.clip(src, 0.0, 1.0) * 255.0).astype(np.uint8).reshape(h, w, 4)
+    return w, h, np.ascontiguousarray(arr[::-1]).tobytes()
+
+
 def _pump():
     st = _state
     scene = bpy.context.scene
@@ -400,6 +425,17 @@ def _pump():
             rt["last_seq"] = seq
             rt["last_size"] = (w, h)
             pushed += 1
+
+        # optional upstream texture (feedback painting): a Blender image -> browser
+        rec = instance_record(rt["name"])
+        if rec is not None and rec.texture and srv.connected:
+            if now - rt.get("tex_t", 0.0) >= 0.1:
+                img = bpy.data.images.get(rec.texture)
+                if img is not None:
+                    packed = image_to_rgba8(img)
+                    if packed is not None:
+                        srv.publish_texture(*packed)
+                        rt["tex_t"] = now
         if pushed:
             rt["frames"] += pushed
             rt["n"] += pushed
@@ -534,6 +570,8 @@ def stats_snapshot():
         "sketch_version": (rt["sketch_version"] if rt else 0),
         "tracked": len((st["state"] or {}).get("objects", [])),
         "client_p5": (srv.stats.get("client_p5") if srv else None),
+        "textures": (srv.stats.get("textures", 0) if srv else 0),
+        "tex_acks": (srv.stats.get("tex_acks", 0) if srv else 0),
         "instance": (rec.name if rec is not None else None),
         "instances": rows,
         "error": st["error"] or (srv.error if srv else ""),
@@ -700,6 +738,21 @@ class P5B_OT_show_canvas(bpy.types.Operator):
         space = area.spaces.active
         space.image = rt["live"].image
         space.ui_mode = "VIEW"
+        return {"FINISHED"}
+
+
+class P5B_OT_feedback(bpy.types.Operator):
+    bl_idname = "p5b.feedback"
+    bl_label = "Use Own Canvas"
+    bl_description = "Feed the active instance's canvas back to its own sketch (feedback painting)"
+
+    def execute(self, context):
+        rec = active_record()
+        if rec is None:
+            self.report({"ERROR"}, "no instance")
+            return {"CANCELLED"}
+        rec.texture = rec.image
+        self.report({"INFO"}, f"{rec.texture} -> {rec.name}")
         return {"FINISHED"}
 
 
@@ -877,6 +930,7 @@ class P5B_Instance(bpy.types.PropertyGroup):
     image: bpy.props.StringProperty(name="Image", default="")
     material: bpy.props.StringProperty(name="Material", default="")
     plane: bpy.props.StringProperty(name="Plane", default="")
+    texture: bpy.props.StringProperty(name="Texture", default="")
 
 
 class P5B_OT_instance_new(bpy.types.Operator):
@@ -1045,6 +1099,11 @@ class P5B_PT_canvas(bpy.types.Panel):
         row.operator("p5b.show_canvas", text="Show", icon="IMAGE_DATA")
         row.operator("p5b.create_window", text="Window Plane", icon="MESH_PLANE")
         layout.operator("p5b.bind_plane", text="Bind Selected Mesh", icon="LINKED")
+        rec = active_record()
+        if rec is not None:
+            layout.prop_search(rec, "texture", bpy.data, "images", text="Texture")
+            row = layout.row(align=True)
+            row.operator("p5b.feedback", text="Feedback", icon="LOOP_BACK")
 
         row = layout.row(align=True)
         op = row.operator("p5b.open_host", text="Open", icon="WINDOW")
@@ -1165,7 +1224,7 @@ classes = (
     P5B_OT_start, P5B_OT_stop, P5B_OT_new_sketch, P5B_OT_run_sketch,
     P5B_OT_open_host, P5B_OT_close_host,
     P5B_OT_create_window, P5B_OT_show_canvas, P5B_OT_track, P5B_OT_untrack,
-    P5B_OT_bind_plane,
+    P5B_OT_bind_plane, P5B_OT_feedback,
     P5B_OT_cook_still, P5B_OT_cook_render, P5B_OT_render_animation,
     P5B_OT_instance_new, P5B_OT_instance_activate, P5B_OT_instance_start,
     P5B_OT_instance_stop, P5B_OT_instance_remove,

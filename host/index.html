@@ -36,6 +36,7 @@ let p5Ready = false;
 let p5Instance = null;
 let placeholder = null;      // canvas used when p5 is unavailable
 let lastState = { objects: [], frame: 0, t: 0 };
+let texCanvas = null;        // upstream texture coming from Blender (P5BT packets)
 let sent = 0, sentT0 = performance.now(), lastSource = '';
 
 // ------------------------------------------------------------- p5.js loader
@@ -69,6 +70,25 @@ async function ensureP5() {
   return false;
 }
 
+// ------------------------------------------------------------ upstream texture
+// Blender -> browser: "P5BT" | w u32 | h u32 | len u32 | RGBA8 (top-down)
+function onTexture(buf) {
+  const bytes = new Uint8Array(buf, 0, 4);
+  if (bytes[0] !== 0x50 || bytes[1] !== 0x35 || bytes[2] !== 0x42 || bytes[3] !== 0x54) return;
+  const dv = new DataView(buf);
+  const w = dv.getUint32(4, true), h = dv.getUint32(8, true), len = dv.getUint32(12, true);
+  if (!w || !h || len !== w * h * 4) return;
+  if (!texCanvas || texCanvas.width !== w || texCanvas.height !== h) {
+    texCanvas = document.createElement('canvas');
+    texCanvas.width = w; texCanvas.height = h;
+  }
+  const ctx = texCanvas.getContext('2d');
+  const data = new Uint8ClampedArray(buf, 16, len);
+  ctx.putImageData(new ImageData(data, w, h), 0, 0);
+  if (p5Instance) p5Instance.p5inblender.texture = texCanvas;
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'texture_ack' }));
+}
+
 // ---------------------------------------------------------------- transport
 function connect() {
   ws = new WebSocket(`ws://${location.host}/`);
@@ -79,7 +99,7 @@ function connect() {
     ws.send(JSON.stringify({ type: 'want_sketch' }));
   };
   ws.onmessage = (ev) => {
-    if (typeof ev.data !== 'string') return;
+    if (typeof ev.data !== 'string') { onTexture(ev.data); return; }
     let msg; try { msg = JSON.parse(ev.data); } catch { return; }
     if (msg.type === 'sketch') loadSketch(msg.source, msg.version);
     else if (msg.type === 'state') {
@@ -156,6 +176,7 @@ function pushStateToSketch(t) {
     frame: lastState.frame || 0,
     w: lastState.w || p5Instance.width,
     h: lastState.h || p5Instance.height,
+    texture: texCanvas,
   };
 }
 
@@ -204,7 +225,7 @@ function loadSketch(source, ver) {
     const fn = factory();
     if (!fn) throw new Error('没有找到 function sketch(p)');
     p5Instance = new p5((p) => {
-      p.p5inblender = { state: lastState, t: 0, frame: 0 };
+      p.p5inblender = { state: lastState, t: 0, frame: 0, texture: texCanvas };
       fn(p);
     }, mount);
   } catch (err) {

@@ -177,6 +177,27 @@ p.createCanvas(p.p5inblender.w || 640, p.p5inblender.h || 360);
 选中任意网格 → `Canvas` 面板 → `Bind Selected Mesh`，它会拿到活动实例的材质
 （没有 UV 会自动建一层）。同一个实例可以被任意多个物体共用。
 
+## 上游纹理 / 反馈绘画（M5.1）
+
+Blender 可以把一张 Image 实时喂给 sketch：
+
+- `Canvas` 面板 → `Texture` 搜索框选任意图像（比如 bake 出来的贴图、Render Result）
+- 或点 `Feedback`：把**该实例自己的画布**当输入，实现自反馈（无限涂抹/漩涡/拖影）
+
+sketch 里读到的是一张 canvas 元素：
+
+```js
+const tex = p.p5inblender.texture;
+if (tex) p.drawingContext.drawImage(tex, 0, 0, p.width, p.height);
+```
+
+通道是下行二进制（`P5BT` 头 + RGBA8），约 10 Hz 取最新帧；Blender 侧每次发送前会把
+当前 Image 转成 top-down RGBA，浏览器用 `putImageData` 还原。实测一次会话 667 次发送全部 ack，
+把 320x180 的条纹图灌进去后画布均值从 0.014 跳到 0.58。
+
+模板里的反馈写法带一点旋转和缩放（`rotate(0.0015 * frameCount)`、`scale(0.996)`），
+这样自反馈会自然长出螺旋；要纯静态贴图就把它去掉。
+
 ## 默认后台运行（没有窗口）
 
 插件启用后不占任何资源；点一次 **Start**，三件事一起做：

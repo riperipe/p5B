@@ -41,9 +41,17 @@
 
 ## 计划
 
-**M5 — 二维/三维真正互通**（COP 借鉴 #6、#7）
-- 上游纹理输入：p5 接收 Blender 纹理做反馈绘画
-- 几何下行：顶点/边进 sketch，Blender 模型成为二维素材
+**M5 — 二维/三维真正互通**
+
+**M5.1 上游纹理（Blender → sketch）** ✅
+- [x] 实例记录带 `texture`（任意 Image datablock）；`Canvas` 面板可搜索选择
+- [x] `Feedback` 按钮：把实例自己的画布当输入（自反馈绘画）
+- [x] 下行二进制纹理通道（`P5BT` 头 + RGBA8，~10 Hz，取最新丢旧）
+- [x] sketch 里读 `p.p5inblender.texture`（一个 canvas 元素）
+- [x] 实测：667 次纹理发送 / 全数 ack；条纹测试图出现在画布上（mean 0.014 → 0.58）
+
+**M5.2 几何下行**（计划）
+- 顶点/边数据进 sketch，Blender 模型成为二维素材
 - 多平面扩展：depth / id / normal
 
 **M6 — 平台与分发**

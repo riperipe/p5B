@@ -81,6 +81,22 @@ def ws_text(payload: bytes) -> bytes:
     return head + payload
 
 
+def ws_binary(payload: bytes) -> bytes:
+    n = len(payload)
+    if n < 126:
+        head = bytes([0x82, n])
+    elif n < 65536:
+        head = bytes([0x82, 126]) + struct.pack(">H", n)
+    else:
+        head = bytes([0x82, 127]) + struct.pack(">Q", n)
+    return head + payload
+
+
+# server -> browser texture payload: magic "P5BT", width, height, length, RGBA8
+TEX_HDR = struct.Struct("<4sIII")
+TEX_MAGIC = b"P5BT"
+
+
 def parse_frame(data: bytes):
     """bytes -> (w, h, seq, req, {plane_name: payload}) or None."""
     if len(data) < 8:
@@ -124,7 +140,8 @@ class FrameServer:
         self.port = port
         self.frames: "queue.Queue[tuple]" = queue.Queue(maxsize=queue_size)
         self.stats = {"frames": 0, "dropped": 0, "clients": 0, "bytes": 0,
-                      "protocol": None, "cooks": 0, "client_p5": None}
+                      "protocol": None, "cooks": 0, "client_p5": None,
+                      "textures": 0, "tex_acks": 0}
         self._active = 0
         self._last_frame_ts = 0.0
         self.error = None
@@ -136,6 +153,7 @@ class FrameServer:
         self._outbox: "queue.Queue[str]" = queue.Queue(maxsize=64)
         self._state_holder = None
         self._state_event = threading.Event()
+        self._bin_outbox: "queue.Queue[bytes]" = queue.Queue(maxsize=2)
 
         # worker -> main-thread
         self.results: dict = {}          # cook id -> (w, h, planes)
@@ -210,6 +228,22 @@ class FrameServer:
     def publish_state(self, payload: str) -> None:
         self._state_holder = payload
         self._state_event.set()
+
+    def publish_texture(self, width: int, height: int, rgba: bytes) -> None:
+        """Latest texture wins; older ones are dropped."""
+        self.stats["textures"] = self.stats.get("textures", 0) + 1
+        blob = TEX_HDR.pack(TEX_MAGIC, width, height, len(rgba)) + rgba
+        try:
+            self._bin_outbox.put_nowait(blob)
+        except queue.Full:
+            try:
+                self._bin_outbox.get_nowait()
+            except queue.Empty:
+                pass
+            try:
+                self._bin_outbox.put_nowait(blob)
+            except queue.Full:
+                pass
 
     def request_cook(self, frame: int, t: float, state: dict | None = None,
                      width: int = 0, height: int = 0) -> int:
@@ -413,6 +447,16 @@ class FrameServer:
                 except queue.Empty:
                     break
                 self._send_text(conn, msg)
+            try:
+                blob = self._bin_outbox.get_nowait()
+            except queue.Empty:
+                blob = None
+            if blob is not None:
+                with self._send_lock:
+                    try:
+                        conn.sendall(ws_binary(blob))
+                    except OSError:
+                        pass
 
     def _send_json(self, conn, obj: dict) -> None:
         self._send_text(conn, json.dumps(obj))
@@ -477,6 +521,8 @@ class FrameServer:
                     self.stats["client_p5"] = bool(msg.get("p5"))
                     self.stats["client_ua"] = str(msg.get("ua", ""))[:90]
                     self._state_event.set()
+                elif msg.get("type") == "texture_ack":
+                    self.stats["tex_acks"] = self.stats.get("tex_acks", 0) + 1
                 continue
             if opcode not in (0x2, 0x0):
                 continue
