@@ -93,6 +93,10 @@ p5inBlender.cook_frame(90)      # 让浏览器渲染第 90 帧 → 等回来 →
 **7. 端口是场景属性，不是常量。** 面板里改过端口后，接收端和浏览器都会跟着变；
 如果手动打开 `127.0.0.1:9877` 而属性已经变成别的值，就会连不上。看面板 `Canvas` 里那一行地址。
 
+**8. 内联 `<script>` 里不能出现字面量 `</script>`。** 用 iframe 跑全局模式时需要拼 HTML 字符串，
+写了 `'</script>'` 会让 HTML 解析器提前结束外层脚本，页面直接 `Unexpected end of input`。
+写成 `'<\/script>'` 就好（Node 的 `--check` 检测不到这个，只有浏览器会炸）。
+
 ## 安装 / 更新
 
 本包已安装到 Blender 的用户 addons 目录（`%APPDATA%\Blender Foundation\Blender\5.1\scripts\addons\p5inBlender`），
@@ -176,6 +180,28 @@ p.createCanvas(p.p5inblender.w || 640, p.p5inblender.h || 360);
 
 选中任意网格 → `Canvas` 面板 → `Bind Selected Mesh`，它会拿到活动实例的材质
 （没有 UV 会自动建一层）。同一个实例可以被任意多个物体共用。
+
+## 用外部 p5 库 / 跑老 sketch（@lib、@mode global）
+
+sketch 顶部可以声明两件事：
+
+```js
+// @lib https://cdn.jsdelivr.net/gh/antiboredom/p5.riso@master/lib/p5.riso.js
+// @mode global
+```
+
+- **`@lib <url>`**：运行前加载这个库（同一 URL 只加载一次，可写多行）。
+  也可以写 `/libs/xxx.js`，从插件目录的 `host/libs/` 取，完全离线。
+- **`@mode global`**：用**全局模式**跑——p5 和 sketch 被放进一个同源 iframe，
+  所以网上绝大多数老 sketch（`function setup(){}` / `function draw(){}` 那种）
+  不用改就能直接跑。数据从 `window.p5inblender` 读。
+- 不写 `@mode` 就用实例模式（`function sketch(p)`），开销略小。
+
+**实测 p5.riso**：见 [tools/demo_riso.js](tools/demo_riso.js)，丝网印网点 + 用 Blender 线框当蓝色印版，
+稳定 56.9 fps。riso 这类只支持全局模式的老库，靠 `@mode global` 就能直接用。
+
+> 性能提示：p5.riso 的网点底纹每帧重画 1600 个圆会掉到 8 fps；
+> 把它画进一个 `createGraphics` 缓存、每帧贴图，就回到 57 fps。
 
 ## 内置 demo
 

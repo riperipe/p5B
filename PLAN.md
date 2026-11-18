@@ -67,6 +67,11 @@
 - [x] `Reset to Demo` 一键写回；新建实例默认就是这份
 - [x] 实测：球体线框 + 脉冲光环 + 拖尾 + HUD，57.8 fps
 
+**M5.5 外部库与全局模式** ✅
+- [x] `// @lib <url>` 按需加载 p5 生态库（可多行、支持本地 `/libs/`）
+- [x] `// @mode global`：p5 + sketch 放进同源 iframe，老 sketch 免改造
+- [x] 实测 p5.riso：网点 + 线框双色印，56.9 fps（缓存网点前只有 8 fps）
+
 **M6 — 平台与分发**（macOS 暂缓，用户明确说不急）
 - macOS 适配（自备 Chromium，不用 WKWebView）
 - 打包：blender_manifest + 可选 Spout/Syphon 加速通道

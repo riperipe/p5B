@@ -346,6 +346,10 @@ class FrameServer:
             self._send_http(conn, 200, "text/javascript; charset=utf-8", self.sketch_source.encode("utf-8"))
         elif path == "/p5.min.js":
             self._send_file(conn, os.path.join(ADDON_DIR, "host", "p5.min.js"), "text/javascript; charset=utf-8")
+        elif path.startswith("/libs/"):
+            name = os.path.basename(path)
+            self._send_file(conn, os.path.join(ADDON_DIR, "host", "libs", name),
+                            "text/javascript; charset=utf-8")
         elif path == "/status":
             body = json.dumps({"version": self.sketch_version, "connected": self.connected,
                                "frames": self.stats["frames"], "cooks": self.stats["cooks"]}).encode()

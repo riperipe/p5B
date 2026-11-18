@@ -21,6 +21,7 @@
     <span id="ws">ws: …</span>
     <span id="p5">p5: …</span>
     <span id="ver">sketch: –</span>
+    <span id="libs">libs: –</span>
     <span id="fps">fps: –</span>
     <span id="objs">objects: –</span>
   </div>
@@ -29,11 +30,14 @@
 <script>
 const mount = document.getElementById('mount');
 const $ = (id) => document.getElementById(id);
-const hud = { ws: $('ws'), p5: $('p5'), ver: $('ver'), fps: $('fps'), objs: $('objs') };
+const hud = { ws: $('ws'), p5: $('p5'), ver: $('ver'), libs: $('libs'), fps: $('fps'), objs: $('objs') };
 
 let ws = null;
 let p5Ready = false;
 let p5Instance = null;
+let iframe = null;           // global-mode sketches run inside an iframe
+let sketchMode = 'instance';
+let pendingSketch = null;
 let placeholder = null;      // canvas used when p5 is unavailable
 let lastState = { objects: [], frame: 0, t: 0 };
 let texCanvas = null;        // upstream texture coming from Blender (P5BT packets)
@@ -113,7 +117,10 @@ function connect() {
     } else if (msg.type === 'cook') {
       if (msg.state) lastState = msg.state;
       pushStateToSketch(msg.t || 0);
-      if (p5Instance) {
+      if (iframe) {
+        try { iframe.contentWindow.redraw && iframe.contentWindow.redraw(); } catch (e) { /* ignore */ }
+        sendFrame(msg.id, activeCanvas());
+      } else if (p5Instance) {
         try { p5Instance.redraw(); } catch (e) { console.error(e); }
         sendFrame(msg.id, p5Instance.canvas);
       } else {
@@ -167,17 +174,45 @@ function sendFrame(req, cv) {
   }
 }
 
+// --------------------------------------------------------------- sketch libs
+// `// @lib <url>` 行会在 sketch 运行前被加载（同一 URL 只加载一次）
+const loadedLibs = new Set();
+
+function extractLibs(source) {
+  const out = [];
+  for (const line of source.split('\n')) {
+    const m = line.match(/^\s*\/\/\s*@lib\s+(\S+)/);
+    if (m) out.push(m[1]);
+  }
+  return out;
+}
+
+async function loadLibs(urls) {
+  for (const url of urls) {
+    if (loadedLibs.has(url)) continue;
+    try {
+      await loadScript(url);
+      loadedLibs.add(url);
+    } catch (err) {
+      console.error('lib failed', url, err);
+    }
+  }
+}
+
 // ------------------------------------------------------------------- sketch
+let sketchToken = 0;
 function pushStateToSketch(t) {
-  if (!p5Instance) return;
-  p5Instance.p5inblender = {
+  const payload = {
     state: lastState,
     t: t,
     frame: lastState.frame || 0,
-    w: lastState.w || p5Instance.width,
-    h: lastState.h || p5Instance.height,
+    w: lastState.w || (p5Instance ? p5Instance.width : 640),
+    h: lastState.h || (p5Instance ? p5Instance.height : 360),
     texture: texCanvas,
   };
+  if (iframe) { setGlobalState(payload); return; }
+  if (!p5Instance) return;
+  p5Instance.p5inblender = payload;
 }
 
 function destroySketch() {
@@ -185,8 +220,57 @@ function destroySketch() {
     try { p5Instance.remove(); } catch (e) { /* ignore */ }
     p5Instance = null;
   }
+  if (iframe) {
+    try { iframe.remove(); } catch (e) { /* ignore */ }
+    iframe = null;
+  }
   mount.innerHTML = '';
   placeholder = null;
+}
+
+// 全局模式：把 p5 和 sketch 放进同源 iframe，让老 sketch 不用改就能跑
+function runGlobalSketch(source, libs) {
+  sketchMode = 'global';
+  iframe = document.createElement('iframe');
+  iframe.style.cssText = 'width:100%;height:100%;border:0;background:#000';
+  mount.appendChild(iframe);
+  const doc = iframe.contentDocument;
+  const libTags = libs.map((u) => '<script src="' + u + '"><\/script>').join('');
+  doc.open();
+  doc.write('<!doctype html><html><head><style>html,body{margin:0;overflow:hidden;background:#000}canvas{display:block}</style>' +
+            '<script src="https://cdn.jsdelivr.net/npm/p5@1.11.3/lib/p5.min.js"><\/script>' + libTags +
+            '</head><body></body></html>');
+  doc.close();
+  const boot = () => {
+    if (!iframe) return;
+    const win = iframe.contentWindow;
+    if (!win || !win.p5) { setTimeout(boot, 60); return; }
+    const tag = iframe.contentDocument.createElement('script');
+    tag.textContent = source;
+    iframe.contentDocument.body.appendChild(tag);
+  };
+  boot();
+}
+
+function activeCanvas() {
+  if (iframe) {
+    try {
+      const doc = iframe.contentDocument;
+      if (doc) return doc.querySelector('canvas');
+    } catch (e) { /* ignore */ }
+    return null;
+  }
+  return p5Instance ? p5Instance.canvas : placeholder;
+}
+
+function globalState() {
+  if (!iframe) return null;
+  try { return iframe.contentWindow.p5inblender; } catch (e) { return null; }
+}
+
+function setGlobalState(obj) {
+  if (!iframe) return;
+  try { iframe.contentWindow.p5inblender = obj; } catch (e) { /* ignore */ }
 }
 
 function makePlaceholder(w, h) {
@@ -212,40 +296,57 @@ function drawPlaceholder() {
 function loadSketch(source, ver) {
   hud.ver.textContent = `sketch: v${ver}`;
   lastSource = source;
+  const token = ++sketchToken;
   destroySketch();
   if (!p5Ready) {
+    pendingSketch = { source: source, ver: ver };
     makePlaceholder(640, 360);
     return;
   }
-  try {
-    // 源码里必须定义 function sketch(p) { ... }
-    const factory = new Function(
-      source + '\n;return typeof sketch === "function" ? sketch : null;',
-    );
-    const fn = factory();
-    if (!fn) throw new Error('没有找到 function sketch(p)');
-    p5Instance = new p5((p) => {
-      p.p5inblender = { state: lastState, t: 0, frame: 0, texture: texCanvas };
-      fn(p);
-    }, mount);
-  } catch (err) {
-    console.error(err);
-    makePlaceholder(640, 360);
-    const ctx = placeholder.getContext('2d');
-    ctx.fillStyle = '#1a0d10'; ctx.fillRect(0, 0, placeholder.width, placeholder.height);
-    ctx.fillStyle = '#ff7b7b'; ctx.font = '14px ui-monospace, monospace';
-    ctx.fillText('sketch 出错：', 20, 40);
-    ctx.fillText(String((err && err.message) || err).slice(0, 110), 20, 66);
+  const libs = extractLibs(source);
+  hud.libs.textContent = libs.length ? `libs: ${libs.length}` : 'libs: –';
+  const globalMode = /^\s*\/\/\s*@mode\s+global/m.test(source);
+  if (globalMode) {
+    runGlobalSketch(source, libs);
+    return;
+  }
+  sketchMode = 'instance';
+  const start = () => {
+    if (token !== sketchToken) return;
+    try {
+      // 源码里必须定义 function sketch(p) { ... }
+      const factory = new Function(
+        source + '\n;return typeof sketch === "function" ? sketch : null;',
+      );
+      const fn = factory();
+      if (!fn) throw new Error('没有找到 function sketch(p)');
+      p5Instance = new p5((p) => {
+        p.p5inblender = { state: lastState, t: 0, frame: 0, texture: texCanvas };
+        fn(p);
+      }, mount);
+    } catch (err) {
+      console.error(err);
+      makePlaceholder(640, 360);
+      const ctx = placeholder.getContext('2d');
+      ctx.fillStyle = '#1a0d10'; ctx.fillRect(0, 0, placeholder.width, placeholder.height);
+      ctx.fillStyle = '#ff7b7b'; ctx.font = '14px ui-monospace, monospace';
+      ctx.fillText('sketch 出错：', 20, 40);
+      ctx.fillText(String((err && err.message) || err).slice(0, 110), 20, 66);
+    }
+  };
+  if (libs.length) {
+    loadLibs(libs).then(start);
+  } else {
+    start();
   }
 }
 
 // ----------------------------------------------------------------- main loop
 function tick() {
-  if (p5Instance) {
+  const cv = activeCanvas();
+  if (cv) {
     pushStateToSketch(lastState.t || 0);
-    sendFrame(0, p5Instance.canvas);
-  } else if (placeholder) {
-    sendFrame(0, placeholder);
+    sendFrame(0, cv);
   }
   requestAnimationFrame(tick);
 }
@@ -255,12 +356,18 @@ setInterval(() => {
   if (document.hidden) tick();
 }, 100);
 
-(document.hidden ? Promise.resolve() : Promise.resolve())
-  .then(ensureP5)
-  .then(() => {
-    connect();
-    requestAnimationFrame(tick);
-  });
+// 先连上，再后台准备 p5 —— 传输不该被库加载挡住
+connect();
+requestAnimationFrame(tick);
+
+ensureP5().then(function (ok) {
+  p5Ready = ok;
+  if (pendingSketch) {
+    const s = pendingSketch;
+    pendingSketch = null;
+    loadSketch(s.source, s.ver);
+  }
+});
 </script>
 </body>
 </html>
