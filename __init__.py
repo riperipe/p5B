@@ -29,7 +29,7 @@ from . import live_image, transport, window
 bl_info = {
     "name": "p5inBlender",
     "author": "DeepseekWorkzone",
-    "version": (0, 4, 1),
+    "version": (0, 4, 2),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > p5inBlender",
     "description": "Live 2D canvas as a UV-mapped texture, coded in Blender's text editor",
@@ -965,11 +965,9 @@ class P5B_PT_params(bpy.types.Panel):
         group = sc.get(PARAM_ATTR) if PARAM_ATTR in sc else None
         for name in schema:
             row = layout.row(align=True)
+            path = f'["{PARAM_ATTR}"]["{name}"]'
             if group is not None and name in group:
-                try:
-                    row.prop(sc, f'{PARAM_ATTR}["{name}"]', text=name)
-                except Exception:
-                    row.label(text=f"{name} · {group[name]:.3f}")
+                row.prop(sc, path, text=name)
             else:
                 row.label(text=f"{name} · not synced")
             op = row.operator("p5b.key_param", text="", icon="KEY_HLT")
