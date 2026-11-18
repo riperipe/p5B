@@ -14,6 +14,7 @@
 import json
 import os
 import queue
+import re
 import subprocess
 import sys
 import tempfile
@@ -28,7 +29,7 @@ from . import live_image, transport, window
 bl_info = {
     "name": "p5inBlender",
     "author": "DeepseekWorkzone",
-    "version": (0, 3, 0),
+    "version": (0, 4, 0),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > p5inBlender",
     "description": "Live 2D canvas as a UV-mapped texture, coded in Blender's text editor",
@@ -37,6 +38,72 @@ bl_info = {
 
 DEFAULT_PORT = 9877
 SKETCH_NAME = "p5b_sketch.js"
+PARAM_ATTR = "p5b_params"
+PARAM_LINE = re.compile(r"^\s*//\s*@param\s+([A-Za-z_]\w*)\s+(-?[\d.]+)(.*)$")
+
+
+def parse_params(source: str) -> dict:
+    """Read `// @param name default [min=..] [max=..]` lines from the sketch.
+
+    Declaring the parameters inside the code keeps one source of truth: the
+    sketch says what it needs, Blender builds the sliders from that.
+    """
+    out = {}
+    for line in source.splitlines():
+        match = PARAM_LINE.match(line)
+        if not match:
+            continue
+        name, default, rest = match.group(1), float(match.group(2)), match.group(3)
+        lo = re.search(r"min=(-?[\d.]+)", rest)
+        hi = re.search(r"max=(-?[\d.]+)", rest)
+        out[name] = {
+            "default": default,
+            "min": float(lo.group(1)) if lo else 0.0,
+            "max": float(hi.group(1)) if hi else max(1.0, default * 2.0),
+        }
+    return out
+
+
+def sketch_params_schema() -> dict:
+    text = bpy.data.texts.get(SKETCH_NAME)
+    return parse_params(text.as_string()) if text else {}
+
+
+def sync_params(scene) -> dict:
+    """Create missing properties from the schema; keep the values the user set."""
+    schema = sketch_params_schema()
+    if PARAM_ATTR not in scene:
+        scene[PARAM_ATTR] = {}
+    group = scene[PARAM_ATTR]
+    for name, spec in schema.items():
+        if name not in group:
+            group[name] = spec["default"]
+    scene[PARAM_ATTR + "_meta"] = {k: {"min": v["min"], "max": v["max"]} for k, v in schema.items()}
+    return schema
+
+
+def param_snapshot(scene) -> dict:
+    group = scene.get(PARAM_ATTR)
+    if group is None:
+        return {}
+    out = {}
+    for key in group.keys():
+        try:
+            out[key] = round(float(group[key]), 6)
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def keyframe_param(scene, name: str):
+    for path in (f'{PARAM_ATTR}["{name}"]', f'["{PARAM_ATTR}"]["{name}"]'):
+        try:
+            if scene.keyframe_insert(data_path=path, frame=scene.frame_current):
+                return path
+        except Exception:
+            continue
+    return None
+
 
 CHROME_REL = (
     r"Google\Chrome\Application\chrome.exe",
@@ -156,6 +223,13 @@ TEMPLATE = r"""// p5b_sketch.js —— 在 Blender 里改，点 Run 生效
 //
 // 要试"点跟着空物体"：给物体加 p5b_track 标记（面板 Track Selected），
 // 然后移动/打关键帧，下面的圆点就会跟着走。
+//
+// 参数：下面几行会被插件解析成 Blender 属性（Params 面板），
+// 可以被关键帧 / 驱动器驱动，每帧随快照下发到 env.params。
+
+// @param hue 0.55 min=0 max=1
+// @param speed 1.0 min=0 max=4
+// @param dot 14 min=2 max=60
 
 let trails = [];
 
@@ -165,6 +239,10 @@ function setup(env) {
 
 function draw(env) {
   const { ctx, w, h, t, state } = env;
+  const p = env.params || {};
+  const hue = p.hue == null ? 0.55 : p.hue;
+  const trailLen = 10 + 60 * (p.speed == null ? 1 : p.speed);
+  const dotR = p.dot == null ? 14 : p.dot;
 
   // 半透明覆盖 = 拖尾
   ctx.fillStyle = "rgba(8, 10, 18, 0.16)";
@@ -176,15 +254,15 @@ function draw(env) {
     const x = o.x * w, y = o.y * h;
     const tr = trails[i] || (trails[i] = []);
     tr.push([x, y]);
-    if (tr.length > 60) tr.shift();
+    if (tr.length > trailLen) tr.shift();
 
-    ctx.strokeStyle = "rgba(120, 240, 255, 0.55)";
+    ctx.strokeStyle = `hsla(${(1 - hue) * 240}, 90%, 65%, 0.6)`;
     ctx.lineWidth = 2;
     ctx.beginPath();
     tr.forEach(([px, py], k) => (k ? ctx.lineTo(px, py) : ctx.moveTo(px, py)));
     ctx.stroke();
 
-    const r = 14;
+    const r = dotR;
     const g = ctx.createRadialGradient(x, y, 0, x, y, r * 2.4);
     g.addColorStop(0, "rgba(255, 240, 200, 1)");
     g.addColorStop(0.4, "rgba(255, 170, 60, 0.75)");
@@ -199,7 +277,8 @@ function draw(env) {
 
   ctx.fillStyle = "rgba(200, 230, 255, 0.75)";
   ctx.font = "12px ui-monospace, monospace";
-  ctx.fillText(`frame ${state.frame}  t=${t.toFixed(2)}  tracked=${objs.length}`, 14, h - 14);
+  ctx.fillText(`frame ${state.frame}  t=${t.toFixed(2)}  tracked=${objs.length}` +
+               `  hue=${hue.toFixed(2)}  speed=${(p.speed == null ? 1 : p.speed).toFixed(2)}`, 14, h - 14);
 }
 """
 
@@ -254,6 +333,7 @@ def build_state(scene) -> dict:
         "frame": scene.frame_current,
         "t": round(scene.frame_current / max(scene.render.fps, 1), 4),
         "objects": objects,
+        "params": param_snapshot(scene),
     }
 
 
@@ -495,6 +575,7 @@ class P5B_OT_run_sketch(bpy.types.Operator):
             if not start_bridge(int(sc.p5b_port), int(sc.p5b_width), int(sc.p5b_height)):
                 self.report({"ERROR"}, _state["error"])
                 return {"CANCELLED"}
+        sync_params(sc)
         ver = push_sketch()
         if ver == 0:
             self.report({"ERROR"}, f"no text named {SKETCH_NAME}")
@@ -541,6 +622,32 @@ class P5B_OT_show_canvas(bpy.types.Operator):
         space = area.spaces.active
         space.image = st["live"].image
         space.ui_mode = "VIEW"
+        return {"FINISHED"}
+
+
+class P5B_OT_sync_params(bpy.types.Operator):
+    bl_idname = "p5b.sync_params"
+    bl_label = "Sync Params"
+    bl_description = "Rebuild scene properties from the // @param lines in the sketch"
+
+    def execute(self, context):
+        schema = sync_params(context.scene)
+        self.report({"INFO"}, f"{len(schema)} parameter(s) synced")
+        return {"FINISHED"}
+
+
+class P5B_OT_keyframe_params(bpy.types.Operator):
+    bl_idname = "p5b.keyframe_params"
+    bl_label = "Keyframe Params"
+    bl_description = "Insert a keyframe for every sketch parameter at the current frame"
+
+    def execute(self, context):
+        sc = context.scene
+        done = 0
+        for name in sketch_params_schema():
+            if keyframe_param(sc, name):
+                done += 1
+        self.report({"INFO"}, f"{done} keyframe(s) inserted")
         return {"FINISHED"}
 
 
@@ -824,6 +931,34 @@ class P5B_PT_render(bpy.types.Panel):
         layout.label(text=f"{st['cooks']} cook request(s)")
 
 
+class P5B_PT_params(bpy.types.Panel):
+    bl_label = "Params"
+    bl_idname = "P5B_PT_params"
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_category = "p5inBlender"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        sc = context.scene
+        layout = self.layout
+        schema = sketch_params_schema()
+        if not schema:
+            layout.label(text="no // @param lines in sketch")
+        group = sc.get(PARAM_ATTR) if PARAM_ATTR in sc else None
+        for name in schema:
+            if group is not None and name in group:
+                try:
+                    layout.prop(sc, f'{PARAM_ATTR}["{name}"]', text=name)
+                except Exception:
+                    layout.label(text=f"{name} · {group[name]:.3f}")
+            else:
+                layout.label(text=f"{name} · not synced")
+        row = layout.row(align=True)
+        row.operator("p5b.sync_params", text="Sync", icon="FILE_REFRESH")
+        row.operator("p5b.keyframe_params", text="Key", icon="KEY_HLT")
+
+
 class P5B_PT_text_sidebar(bpy.types.Panel):
     """Run button right next to the code."""
 
@@ -847,7 +982,8 @@ classes = (
     P5B_OT_open_host, P5B_OT_close_host,
     P5B_OT_create_window, P5B_OT_show_canvas, P5B_OT_track, P5B_OT_untrack,
     P5B_OT_cook_still, P5B_OT_cook_render, P5B_OT_render_animation,
-    P5B_PT_panel, P5B_PT_canvas, P5B_PT_sketch, P5B_PT_tracking, P5B_PT_render,
+    P5B_OT_sync_params, P5B_OT_keyframe_params,
+    P5B_PT_panel, P5B_PT_canvas, P5B_PT_sketch, P5B_PT_tracking, P5B_PT_render, P5B_PT_params,
     P5B_PT_text_sidebar, P5B_MT_menu,
 )
 

@@ -148,6 +148,7 @@ function placeholder() {
 function renderWith(state, t) {
   env.w = canvas.width; env.h = canvas.height;
   env.state = state || { objects: [] };
+  env.params = (state && state.params) || {};
   env.t = t || 0;
   env.frame = (state && state.frame) || 0;
   if (!api) { placeholder(); return; }

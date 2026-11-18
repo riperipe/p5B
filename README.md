@@ -108,6 +108,24 @@ p5inBlender.cook_frame(90)      # 让浏览器渲染第 90 帧 → 等回来 →
 3. 偏好设置里 disable → enable
 4. `git add -A && git commit -m "vX.Y.Z: ..." && git tag vX.Y.Z`
 
+## 参数即通道（M3）
+
+在 sketch 顶部写几行声明，插件的 `Params` 面板就会自动出现对应滑杆：
+
+```js
+// @param hue   0.55 min=0 max=1
+// @param speed 1.0  min=0 max=4
+// @param dot   14   min=2 max=60
+```
+
+- 值存在 `scene["p5b_params"]` 里，随时可以通过**关键帧 / 驱动器 / 表达式**驱动：
+  - 关键帧：面板 `Key` 按钮，或 `scene.keyframe_insert('["p5b_params"]["hue"]')`
+  - 驱动器：`scene.driver_add('["p5b_params"]["speed"]')`，表达式如 `1.5 + sin(frame/24)*1.5`
+- 每帧跟着快照下发，sketch 里读 `env.params.hue`
+- 改完 Param 值不用点 Run，下一帧就生效；改**声明**才需要点 `Sync`
+
+实测：`hue` 从 0.05 改到 0.95，画面 md5 从 `a27f1836eb` 变成 `d330396be1`。
+
 ## 默认后台运行（没有窗口）
 
 插件启用后不占任何资源；点一次 **Start**，三件事一起做：

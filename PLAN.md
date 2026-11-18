@@ -33,10 +33,13 @@ frame 60 两次 cook 的 md5 同为 `23a81e63d575`，frame 90 / 30 各自不同�
 
 ## 计划
 
-**M3 — 参数即通道**（COP 借鉴 #4）
-- sketch 声明参数 schema → Blender 生成属性/面板
-- 被 keyframe / driver / 表达式驱动，随快照下发
-- lil-gui 降级为浏览器内调试，不作为正式参数入口
+**M3 — 参数即通道**（COP 借鉴 #4） ✅ 主体完成
+- [x] sketch 里用 `// @param name default min= max=` 声明参数
+- [x] 插件解析 → 场景属性 `scene["p5b_params"]`，`Params` 面板自动出滑杆
+- [x] 关键帧可打（实测可用路径 `["p5b_params"]["hue"]`）
+- [x] 驱动器可用（实测 `driver_add('["p5b_params"]["speed"]')` + 表达式驱动）
+- [x] 每帧随快照下发，sketch 通过 `env.params` 读取
+- [ ] lil-gui 降级为浏览器内调试（尚未接入 lil-gui）
 
 **M4 — 实例化**（COP 借鉴 #1、#3、#5）
 - `P5B_Instance`：每个实例独立 image + 参数 + 分辨率覆盖
