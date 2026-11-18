@@ -124,7 +124,7 @@ class FrameServer:
         self.port = port
         self.frames: "queue.Queue[tuple]" = queue.Queue(maxsize=queue_size)
         self.stats = {"frames": 0, "dropped": 0, "clients": 0, "bytes": 0,
-                      "protocol": None, "cooks": 0}
+                      "protocol": None, "cooks": 0, "client_p5": None}
         self._active = 0
         self._last_frame_ts = 0.0
         self.error = None
@@ -310,6 +310,8 @@ class FrameServer:
             self._send_file(conn, os.path.join(ADDON_DIR, "host", "index.html"), "text/html; charset=utf-8")
         elif path == "/sketch.js":
             self._send_http(conn, 200, "text/javascript; charset=utf-8", self.sketch_source.encode("utf-8"))
+        elif path == "/p5.min.js":
+            self._send_file(conn, os.path.join(ADDON_DIR, "host", "p5.min.js"), "text/javascript; charset=utf-8")
         elif path == "/status":
             body = json.dumps({"version": self.sketch_version, "connected": self.connected,
                                "frames": self.stats["frames"], "cooks": self.stats["cooks"]}).encode()
@@ -472,6 +474,8 @@ class FrameServer:
                     self._send_json(conn, {"type": "sketch", "version": self.sketch_version,
                                            "source": self.sketch_source})
                 elif msg.get("type") == "ready":
+                    self.stats["client_p5"] = bool(msg.get("p5"))
+                    self.stats["client_ua"] = str(msg.get("ua", ""))[:90]
                     self._state_event.set()
                 continue
             if opcode not in (0x2, 0x0):

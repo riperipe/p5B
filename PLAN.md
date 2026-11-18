@@ -33,13 +33,15 @@ frame 60 两次 cook 的 md5 同为 `23a81e63d575`，frame 90 / 30 各自不同�
 
 ## 计划
 
-**M3 — 参数即通道**（COP 借鉴 #4） ✅ 主体完成
-- [x] sketch 里用 `// @param name default min= max=` 声明参数
-- [x] 插件解析 → 场景属性 `scene["p5b_params"]`，`Params` 面板自动出滑杆
-- [x] 关键帧可打（实测可用路径 `["p5b_params"]["hue"]`）
-- [x] 驱动器可用（实测 `driver_add('["p5b_params"]["speed"]')` + 表达式驱动）
-- [x] 每帧随快照下发，sketch 通过 `env.params` 读取
-- [ ] lil-gui 降级为浏览器内调试（尚未接入 lil-gui）
+**M3 — 参数即通道** ⏸ 暂时移除
+- 已完成过一版（`// @param` → 场景属性 → 可 K 帧/驱动），但面板显示有坑、交互不顺，
+  按用户决定先从 UI 移除，等主链路稳定后再回来做。
+- 代码里相关的 `parse_params` / `sync_params` / Params 面板已删除。
+
+**M3.5 — 真 p5.js** ✅
+- 宿主改为加载真 p5.js（本地 `host/p5.min.js` → CDN → 提示），sketch 用实例模式 `function sketch(p)`
+- 面板可查 `client_p5` 确认 p5 是否真的加载
+- 仍支持 `p5inblender.state` 快照（跟踪物体 → 屏幕坐标）
 
 **M4 — 实例化**（COP 借鉴 #1、#3、#5）
 - `P5B_Instance`：每个实例独立 image + 参数 + 分辨率覆盖

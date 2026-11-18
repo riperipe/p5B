@@ -108,23 +108,45 @@ p5inBlender.cook_frame(90)      # 让浏览器渲染第 90 帧 → 等回来 →
 3. 偏好设置里 disable → enable
 4. `git add -A && git commit -m "vX.Y.Z: ..." && git tag vX.Y.Z`
 
-## 参数即通道（M3）
+## 写 p5.js sketch
 
-在 sketch 顶部写几行声明，插件的 `Params` 面板就会自动出现对应滑杆：
+在 Blender 的 Text Editor 里编辑 `p5b_sketch.js`，点 `Run`。宿主会执行 `sketch(p)`，
+**跑的是真 p5.js**（实例模式）：
 
 ```js
-// @param hue   0.55 min=0 max=1
-// @param speed 1.0  min=0 max=4
-// @param dot   14   min=2 max=60
+function sketch(p) {
+  p.setup = function () {
+    p.createCanvas(640, 360);
+    p.frameRate(60);
+  };
+  p.draw = function () {
+    p.background(10, 12, 20);
+    p.fill(255, 200, 80);
+    p.circle(p.width / 2, p.height / 2, 80);
+  };
+}
 ```
 
-- 值存在 `scene["p5b_params"]` 里，随时可以通过**关键帧 / 驱动器 / 表达式**驱动：
-  - 关键帧：面板 `Key` 按钮，或 `scene.keyframe_insert('["p5b_params"]["hue"]')`
-  - 驱动器：`scene.driver_add('["p5b_params"]["speed"]')`，表达式如 `1.5 + sin(frame/24)*1.5`
-- 每帧跟着快照下发，sketch 里读 `env.params.hue`
-- 改完 Param 值不用点 Run，下一帧就生效；改**声明**才需要点 `Sync`
+场景数据通过 `p.p5inblender` 传进 sketch：
 
-实测：`hue` 从 0.05 改到 0.95，画面 md5 从 `a27f1836eb` 变成 `d330396be1`。
+```js
+const { state, t, frame } = p.p5inblender;
+state.objects[] = { name, x, y, depth, visible }   // x/y 已归一化到 0..1
+```
+
+`x * p.width` / `y * p.height` 就是屏幕坐标，所以"点跟着空物体走"只要几行。
+
+### p5.js 从哪来
+
+宿主加载顺序：插件目录里的 `host/p5.min.js` → CDN（jsdelivr）→ 都失败就显示提示。
+当前状态可以在面板 `Sketch` 区看到：`client_p5: true` 表示真 p5.js 已在浏览器里跑起来。
+**要完全离线**：把 `p5.min.js` 放进 `host/` 目录，刷新页面即可（HTTP 会从 `/p5.min.js` 提供）。
+
+### 注意事项
+
+- sketch 里必须定义 `function sketch(p)`，不要自己调 `p.loop()` / `p.noLoop()` 之外的循环控制
+- p5 的 `WEBGL` 模式读不到像素（`getImageData` 对 WebGL 画布返回空），用默认 2D 模式
+- 改完代码点 `Run` 即可热更新，不用重启 Blender
 
 ## 默认后台运行（没有窗口）
 
