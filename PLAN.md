@@ -50,9 +50,12 @@
 - [x] sketch 里读 `p.p5inblender.texture`（一个 canvas 元素）
 - [x] 实测：667 次纹理发送 / 全数 ack；条纹测试图出现在画布上（mean 0.014 → 0.58）
 
-**M5.2 几何下行**（计划）
-- 顶点/边数据进 sketch，Blender 模型成为二维素材
-- 多平面扩展：depth / id / normal
+**M5.2 几何下行（Blender 模型 → sketch 线框）** ✅
+- [x] `Tracking` 面板 `Send Geometry` 标记网格（`p5b_geo`）
+- [x] Blender 侧把顶点投影成 2D 屏幕坐标，连同边索引一起下发（≤2000 顶点 / 4000 边）
+- [x] 10 Hz 缓存下发，参与 state 与 cook
+- [x] sketch 里 `state.geo[] = { name, verts:[[x,y]...], edges:[[a,b]...] }`
+- [x] 实测：42 顶点 / 120 边的二十面体球，画布上出现绿色线框（81473 个绿色像素）
 
 **M5.3 编辑体验** ✅
 - [x] `Edit Sketch` 按钮（三处入口），自动定位到当前实例的文本

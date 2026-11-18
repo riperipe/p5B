@@ -201,6 +201,27 @@ sketch 就是 Blender 里的一个 **Text datablock**（不是磁盘文件），
 注意：改插件源码里的 `TEMPLATE` 不会更新已经存在的 Text datablock——想要新模板就删掉那份文本
 （Text Editor → 文本菜单 → Unlink），再点一次 `Edit Sketch` 重新生成。
 
+## 几何下行：模型变成二维线框（M5.2）
+
+选中网格 → `Tracking` 面板 → `Send Geometry`。Blender 会把它的**顶点投影成 2D 屏幕坐标**，
+连同边索引一起塞进 state：
+
+```js
+const geo = state.geo || [];       // [{ name, verts: [[x,y]...], edges: [[a,b]...] }]
+geo.forEach(g => {
+  p.beginShape(p.LINES);
+  g.edges.forEach(([a, b]) => {
+    p.vertex(g.verts[a][0] * p.width, g.verts[a][1] * p.height);
+    p.vertex(g.verts[b][0] * p.width, g.verts[b][1] * p.height);
+  });
+  p.endShape();
+});
+```
+
+- 上限：每个物体 2000 顶点 / 4000 边；10 Hz 更新（缓存在 pump 里）
+- 坐标已经归一化到 0..1，乘 `p.width/p.height` 即可
+- 实测：42 顶点 / 120 边的二十面体球在画布上画出绿色线框
+
 ## 上游纹理 / 反馈绘画（M5.1）
 
 Blender 可以把一张 Image 实时喂给 sketch：

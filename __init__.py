@@ -29,7 +29,7 @@ from . import live_image, transport, window
 bl_info = {
     "name": "p5inBlender",
     "author": "DeepseekWorkzone",
-    "version": (0, 9, 0),
+    "version": (0, 10, 0),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > p5inBlender",
     "description": "Live 2D canvas as a UV-mapped texture, coded in Blender's text editor",
@@ -199,6 +199,21 @@ function sketch(p) {
       p.fill(8, 10, 18, 42);
       p.rect(0, 0, p.width, p.height);
     }
+
+    // Blender 送来的投影线框（Tracking 面板 → Send Geometry）
+    (state.geo || []).forEach((g) => {
+      p.noFill();
+      p.stroke(0, 255, 190, 120);
+      p.strokeWeight(1);
+      p.beginShape(p.LINES);
+      (g.edges || []).forEach(([a, b]) => {
+        const va = (g.verts || [])[a], vb = (g.verts || [])[b];
+        if (!va || !vb) return;
+        p.vertex(va[0] * p.width, va[1] * p.height);
+        p.vertex(vb[0] * p.width, vb[1] * p.height);
+      });
+      p.endShape();
+    });
 
     objs.forEach((o, i) => {
       if (o.visible === false) return;
@@ -388,6 +403,32 @@ def instance_push(rec) -> int:
     return rt["sketch_version"]
 
 
+def build_geometry(scene) -> list:
+    """Meshes marked with p5b_geo, projected to 2D screen space.
+
+    The sketch gets wireframe data without doing any 3D math: Blender does the
+    projection, the canvas just draws lines.
+    """
+    cam = scene.camera
+    if cam is None:
+        return []
+    out = []
+    for ob in scene.objects:
+        if ob.type != "MESH" or not ob.get("p5b_geo"):
+            continue
+        me = ob.data
+        mw = ob.matrix_world
+        verts = []
+        for v in me.vertices:
+            p = world_to_camera_view(scene, cam, mw @ v.co)
+            verts.append([round(float(p.x), 4), round(1.0 - float(p.y), 4)])
+            if len(verts) >= 2000:
+                break
+        edges = [[int(e.vertices[0]), int(e.vertices[1])] for e in me.edges][:4000]
+        out.append({"name": ob.name, "verts": verts, "edges": edges})
+    return out
+
+
 def image_to_rgba8(img):
     """Blender image -> top-down RGBA8 bytes (what ImageData wants)."""
     w, h = img.size
@@ -469,6 +510,10 @@ def _pump():
 
     try:
         state = build_state(scene)
+        if now - st.get("geo_t", 0.0) >= 0.2:
+            st["geo"] = build_geometry(scene)
+            st["geo_t"] = now
+        state["geo"] = st.get("geo", [])
         st["state"] = state
         for rt in st["instances"].values():
             srv = rt["server"]
@@ -613,6 +658,7 @@ def cook_frame(frame: int | None = None, timeout: float = 5.0) -> int:
     w = int((rec.width if rec else 0) or scene.p5b_width)
     h = int((rec.height if rec else 0) or scene.p5b_height)
     state = build_state(scene)
+    state["geo"] = build_geometry(scene)
     state["w"] = w
     state["h"] = h
     fps = max(scene.render.fps, 1)
@@ -803,6 +849,35 @@ class P5B_OT_bind_plane(bpy.types.Operator):
             else:
                 data.materials[0] = mat
         self.report({"INFO"}, f"bound {len(targets)} mesh(es) to {rec.name}")
+        return {"FINISHED"}
+
+
+class P5B_OT_mark_geo(bpy.types.Operator):
+    bl_idname = "p5b.mark_geo"
+    bl_label = "Send Geometry"
+    bl_description = "Send the selected meshes' projected wireframe to the sketch"
+
+    def execute(self, context):
+        n = 0
+        for ob in context.selected_objects:
+            if ob.type == "MESH":
+                ob["p5b_geo"] = True
+                n += 1
+        self.report({"INFO"}, f"{n} mesh(es) marked")
+        return {"FINISHED"}
+
+
+class P5B_OT_unmark_geo(bpy.types.Operator):
+    bl_idname = "p5b.unmark_geo"
+    bl_label = "Stop Geometry"
+
+    def execute(self, context):
+        n = 0
+        for ob in context.selected_objects:
+            if "p5b_geo" in ob:
+                del ob["p5b_geo"]
+                n += 1
+        self.report({"INFO"}, f"{n} mesh(es) unmarked")
         return {"FINISHED"}
 
 
@@ -1180,6 +1255,9 @@ class P5B_PT_tracking(bpy.types.Panel):
         row = layout.row(align=True)
         row.operator("p5b.track", text="Track Selected", icon="TRACKER")
         row.operator("p5b.untrack", text="", icon="CANCEL")
+        row = layout.row(align=True)
+        row.operator("p5b.mark_geo", text="Send Geometry", icon="MESH_DATA")
+        row.operator("p5b.unmark_geo", text="", icon="X")
         layout.label(text=f"{st['tracked']} object(s) sent to the sketch")
 
 
@@ -1253,7 +1331,7 @@ classes = (
     P5B_OT_start, P5B_OT_stop, P5B_OT_new_sketch, P5B_OT_run_sketch,
     P5B_OT_open_host, P5B_OT_close_host,
     P5B_OT_create_window, P5B_OT_show_canvas, P5B_OT_track, P5B_OT_untrack,
-    P5B_OT_bind_plane, P5B_OT_feedback,
+    P5B_OT_bind_plane, P5B_OT_feedback, P5B_OT_mark_geo, P5B_OT_unmark_geo,
     P5B_OT_cook_still, P5B_OT_cook_render, P5B_OT_render_animation,
     P5B_OT_instance_new, P5B_OT_instance_activate, P5B_OT_instance_start,
     P5B_OT_instance_stop, P5B_OT_instance_remove,
