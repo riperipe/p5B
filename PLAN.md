@@ -54,6 +54,11 @@
 - 顶点/边数据进 sketch，Blender 模型成为二维素材
 - 多平面扩展：depth / id / normal
 
+**M5.3 编辑体验** ✅
+- [x] `Edit Sketch` 按钮（三处入口），自动定位到当前实例的文本
+- [x] `Auto Run on Edit`：改完 ~0.3 秒自动推送（实测版本 1→2，画面 md5 变化）
+- [x] `Sketch` 面板显示当前 `text:` 名称
+
 **M6 — 平台与分发**
 - macOS 适配（自备 Chromium，不用 WKWebView）
 - 打包：blender_manifest + 可选 Spout/Syphon 加速通道

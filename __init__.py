@@ -29,7 +29,7 @@ from . import live_image, transport, window
 bl_info = {
     "name": "p5inBlender",
     "author": "DeepseekWorkzone",
-    "version": (0, 8, 0),
+    "version": (0, 9, 0),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > p5inBlender",
     "description": "Live 2D canvas as a UV-mapped texture, coded in Blender's text editor",
@@ -436,6 +436,22 @@ def _pump():
                     if packed is not None:
                         srv.publish_texture(*packed)
                         rt["tex_t"] = now
+
+        # auto-run: push a sketch again once its text stops changing
+        if rec is not None and getattr(scene, "p5b_auto_run", True):
+            if now - rt.get("ar_t", 0.0) >= 0.3:
+                rt["ar_t"] = now
+                text = bpy.data.texts.get(rec.text)
+                if text is not None:
+                    digest = hash(text.as_string())
+                    if rt.get("src_hash") is None:
+                        rt["src_hash"] = digest
+                    elif digest != rt["src_hash"]:
+                        if rt.get("pending_hash") == digest:
+                            rt["src_hash"] = digest
+                            instance_push(rec)
+                        else:
+                            rt["pending_hash"] = digest
         if pushed:
             rt["frames"] += pushed
             rt["n"] += pushed
@@ -648,15 +664,21 @@ class P5B_OT_stop(bpy.types.Operator):
 
 class P5B_OT_new_sketch(bpy.types.Operator):
     bl_idname = "p5b.new_sketch"
-    bl_label = "New Sketch"
-    bl_description = "Create the sketch text datablock and open a text editor for it"
+    bl_label = "Edit Sketch"
+    bl_description = "Open this instance's sketch text in a Text Editor (creating it if needed)"
 
     def execute(self, context):
-        text = bpy.data.texts.get(SKETCH_NAME)
+        sc = context.scene
+        ensure_default_instance()
+        rec = active_record()
+        if rec is None:
+            self.report({"ERROR"}, "no instance")
+            return {"CANCELLED"}
+        text = bpy.data.texts.get(rec.text)
         if text is None:
-            text = bpy.data.texts.new(SKETCH_NAME)
+            text = bpy.data.texts.new(rec.text)
             text.from_string(TEMPLATE)
-        # find a text editor to show it in
+        # show it in an existing text editor, or turn a node editor into one
         shown = False
         for wm in bpy.data.window_managers:
             for win in wm.windows:
@@ -673,7 +695,7 @@ class P5B_OT_new_sketch(bpy.types.Operator):
                         area.type = "TEXT_EDITOR"
                         area.spaces.active.text = text
                         shown = True
-        self.report({"INFO"}, f"{SKETCH_NAME} ready")
+        self.report({"INFO"}, f"editing {rec.name} → {rec.text}")
         return {"FINISHED"}
 
 
@@ -1042,6 +1064,9 @@ def _draw_status_and_start(layout):
     row.scale_y = 1.4
     row.operator("p5b.start", text="Start", icon="PLAY")
     row.operator("p5b.stop", text="Stop", icon="SNAP_FACE")
+    row = layout.row(align=True)
+    row.operator("p5b.new_sketch", text="Edit Sketch", icon="TEXT")
+    row.operator("p5b.run_sketch", text="Run", icon="SCRIPTPLUGINS")
 
 
 class P5B_MT_menu(bpy.types.Menu):
@@ -1130,10 +1155,14 @@ class P5B_PT_sketch(bpy.types.Panel):
 
     def draw(self, context):
         st = stats_snapshot()
+        rec = active_record()
         layout = self.layout
         row = layout.row(align=True)
         row.operator("p5b.run_sketch", text="Run", icon="PLAY")
-        row.operator("p5b.new_sketch", text="New", icon="TEXT")
+        row.operator("p5b.new_sketch", text="Edit", icon="TEXT")
+        if rec is not None:
+            layout.label(text=f"text: {rec.text}")
+        layout.prop(context.scene, "p5b_auto_run", text="Auto Run on Edit")
         layout.label(text=f"v{st['sketch_version']} · {st['frames']} frames · {st['dropped']} dropped")
 
 
@@ -1259,6 +1288,8 @@ def register():
         bpy.types.Scene.p5b_instances = bpy.props.CollectionProperty(type=P5B_Instance)
     if not hasattr(bpy.types.Scene, "p5b_active"):
         bpy.types.Scene.p5b_active = bpy.props.IntProperty(name="Active", default=0)
+    if not hasattr(bpy.types.Scene, "p5b_auto_run"):
+        bpy.types.Scene.p5b_auto_run = bpy.props.BoolProperty(name="Auto Run", default=True)
     if _on_load_post not in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.append(_on_load_post)
     try:
@@ -1281,6 +1312,6 @@ def unregister():
             bpy.utils.unregister_class(cls)
         except RuntimeError:
             pass
-    for prop in ("p5b_port", "p5b_width", "p5b_height", "p5b_instances", "p5b_active"):
+    for prop in ("p5b_port", "p5b_width", "p5b_height", "p5b_instances", "p5b_active", "p5b_auto_run"):
         if hasattr(bpy.types.Scene, prop):
             delattr(bpy.types.Scene, prop)

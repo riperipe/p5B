@@ -177,6 +177,30 @@ p.createCanvas(p.p5inblender.w || 640, p.p5inblender.h || 360);
 选中任意网格 → `Canvas` 面板 → `Bind Selected Mesh`，它会拿到活动实例的材质
 （没有 UV 会自动建一层）。同一个实例可以被任意多个物体共用。
 
+## 改代码：在哪改、改完怎么同步
+
+sketch 就是 Blender 里的一个 **Text datablock**（不是磁盘文件），三处入口都指向它：
+
+| 入口 | 说明 |
+|---|---|
+| N 面板 → `p5inBlender` → `Edit Sketch` | 自动打开 Text Editor 并载入当前实例的文本 |
+| N 面板 → `Sketch` → `Edit` | 同上，面板里还会显示 `text: p5b_sketch_<实例>.js` |
+| 3D 视图顶栏菜单 → `p5inBlender` → `Edit Sketch` | 同上 |
+| 任意区域切成 Text Editor | 左上角下拉选 `p5b_sketch_<实例>.js` |
+
+多实例时每个实例有自己的一份文本；`Sketch` 面板里的 `text:` 就是你正在编辑的那份。
+
+### 同步方式
+
+- **默认自动**：`Sketch` 面板里的 `Auto Run on Edit` 开着时，改完停手约 0.3 秒自动推送，
+  画面会自己变，不用点任何按钮。
+- **手动**：关掉 `Auto Run on Edit`，改完点 `Run`（N 面板 / 顶栏菜单 / Text Editor 侧栏都有）。
+
+实测：只改文本不点 Run，版本 1→2，画面 md5 从 `6ea887a85f` 变成 `5308e53464`。
+
+注意：改插件源码里的 `TEMPLATE` 不会更新已经存在的 Text datablock——想要新模板就删掉那份文本
+（Text Editor → 文本菜单 → Unlink），再点一次 `Edit Sketch` 重新生成。
+
 ## 上游纹理 / 反馈绘画（M5.1）
 
 Blender 可以把一张 Image 实时喂给 sketch：
