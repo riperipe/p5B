@@ -62,7 +62,12 @@
 - [x] `Auto Run on Edit`：改完 ~0.3 秒自动推送（实测版本 1→2，画面 md5 变化）
 - [x] `Sketch` 面板显示当前 `text:` 名称
 
-**M6 — 平台与分发**
+**M5.4 内置 demo** ✅
+- [x] `tools/demo_sketch.js` 同时演示 跟随点 / 几何线框 / 上游纹理
+- [x] `Reset to Demo` 一键写回；新建实例默认就是这份
+- [x] 实测：球体线框 + 脉冲光环 + 拖尾 + HUD，57.8 fps
+
+**M6 — 平台与分发**（macOS 暂缓，用户明确说不急）
 - macOS 适配（自备 Chromium，不用 WKWebView）
 - 打包：blender_manifest + 可选 Spout/Syphon 加速通道
 

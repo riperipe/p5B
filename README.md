@@ -177,6 +177,20 @@ p.createCanvas(p.p5inblender.w || 640, p.p5inblender.h || 360);
 选中任意网格 → `Canvas` 面板 → `Bind Selected Mesh`，它会拿到活动实例的材质
 （没有 UV 会自动建一层）。同一个实例可以被任意多个物体共用。
 
+## 内置 demo
+
+新建实例、或点 `Sketch` 面板的 `Reset to Demo`，会写入一份同时演示三条通道的 sketch
+（源码也在 [tools/demo_sketch.js](tools/demo_sketch.js)）：
+
+- 被跟踪物体 → 橙色脉冲光环 + 拖尾 + 名字
+- `p5b_geo` 模型 → 青绿色投影线框（球体）
+- 上游纹理 → 若设了 `Texture`/`Feedback`，作为背景做自反馈
+
+![demo](docs/demo.png)
+
+一步到位看到效果：选中一个空物体 → `Tracking` → `Track Selected`；
+选中一个网格 → `Tracking` → `Send Geometry`；然后 `Run`。
+
 ## 改代码：在哪改、改完怎么同步
 
 sketch 就是 Blender 里的一个 **Text datablock**（不是磁盘文件），三处入口都指向它：

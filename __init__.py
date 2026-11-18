@@ -29,7 +29,7 @@ from . import live_image, transport, window
 bl_info = {
     "name": "p5inBlender",
     "author": "DeepseekWorkzone",
-    "version": (0, 10, 0),
+    "version": (0, 11, 0),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > p5inBlender",
     "description": "Live 2D canvas as a UV-mapped texture, coded in Blender's text editor",
@@ -155,97 +155,118 @@ def host_status() -> dict:
             "pid": last["proc"].pid if last else None,
             "ports": [h["port"] for h in hosts]}
 
-TEMPLATE = r"""// p5b_sketch.js —— 在 Blender 里改，点 Run 生效（真 p5.js 实例模式）
+TEMPLATE = r"""// p5b_sketch.js —— p5inBlender demo
 //
-// 宿主会执行 sketch(p)：
-//   p.setup()  一次；用 p.createCanvas(640, 360) 建画布
-//   p.draw()   每帧；画完自动把画布回传给 Blender
+// 这一份同时演示三件事：
+//   1. 被跟踪物体（Tracking → Track Selected）的屏幕坐标，画成带拖尾的光点
+//   2. 模型线框（Tracking → Send Geometry），Blender 投影好直接画线
+//   3. 上游纹理（Canvas → Texture / Feedback），当背景画，做自反馈
 //
-// 场景数据在 p.p5inblender 里：
-//   p.p5inblender.state.objects[] = { name, x, y, depth, visible }  // x/y 是 0..1
-//   p.p5inblender.state.frame / p.p5inblender.t
-//
-// 要"点跟着空物体"：选中物体 → 面板 Tracking → Track Selected，然后移动它。
+// 改完不用点 Run（Auto Run on Edit 开着时约 0.3 秒自动生效）。
 
-let trails = [];
+let trails = {};
 
 function sketch(p) {
   p.setup = function () {
     const d = p.p5inblender || {};
-    p.createCanvas(d.w || 640, d.h || 360);   // 尺寸跟随实例设置
+    p.createCanvas(d.w || 640, d.h || 360);
     p.frameRate(60);
-    p.noStroke();
+    p.pixelDensity(1);
   };
 
   p.draw = function () {
-    const ctxData = p.p5inblender || {};
-    const state = ctxData.state || { objects: [] };
+    const D = p.p5inblender || {};
+    const state = D.state || { objects: [], geo: [] };
     const objs = state.objects || [];
+    const geo = state.geo || [];
+    const tex = D.texture;
 
-    // 上游纹理（如果 Blender 那边设了 Texture / 点了 Feedback）
-    const tex = ctxData.texture;
+    // 1) 背景：有上游纹理就铺纹理（自反馈），否则用半透明覆盖做拖尾
     if (tex) {
       p.push();
       p.translate(p.width / 2, p.height / 2);
-      p.rotate(0.0015 * (p.frameCount % 2000));
-      p.scale(0.996);
-      p.drawingContext.globalAlpha = 0.965;
+      p.rotate(0.0012 * (p.frameCount % 2000));
+      p.scale(0.9975);
+      p.drawingContext.globalAlpha = 0.96;
       p.drawingContext.drawImage(tex, -p.width / 2, -p.height / 2, p.width, p.height);
       p.drawingContext.globalAlpha = 1;
       p.pop();
     } else {
-      // 半透明覆盖 = 拖尾
       p.noStroke();
-      p.fill(8, 10, 18, 42);
+      p.fill(6, 8, 14, 38);
       p.rect(0, 0, p.width, p.height);
     }
 
-    // Blender 送来的投影线框（Tracking 面板 → Send Geometry）
-    (state.geo || []).forEach((g) => {
+    // 2) 网格底纹（每帧重画，避免拖尾糊成一片）
+    p.stroke(120, 200, 255, 12);
+    p.strokeWeight(1);
+    for (let x = 0; x < p.width; x += 48) p.line(x, 0, x, p.height);
+    for (let y = 0; y < p.height; y += 48) p.line(0, y, p.width, y);
+
+    // 3) 几何线框：Blender 已经投影到 0..1，这里只乘尺寸
+    geo.forEach(function (g) {
       p.noFill();
-      p.stroke(0, 255, 190, 120);
-      p.strokeWeight(1);
+      p.strokeWeight(1.2);
+      p.stroke(0, 255, 190, 90);
       p.beginShape(p.LINES);
-      (g.edges || []).forEach(([a, b]) => {
-        const va = (g.verts || [])[a], vb = (g.verts || [])[b];
+      (g.edges || []).forEach(function (e) {
+        const va = (g.verts || [])[e[0]];
+        const vb = (g.verts || [])[e[1]];
         if (!va || !vb) return;
         p.vertex(va[0] * p.width, va[1] * p.height);
         p.vertex(vb[0] * p.width, vb[1] * p.height);
       });
       p.endShape();
-    });
-
-    objs.forEach((o, i) => {
-      if (o.visible === false) return;
-      const x = o.x * p.width, y = o.y * p.height;
-      const tr = trails[i] || (trails[i] = []);
-      tr.push([x, y]);
-      if (tr.length > 70) tr.shift();
-
-      p.noFill();
-      p.stroke(120, 240, 255, 150);
-      p.strokeWeight(2);
-      p.beginShape();
-      tr.forEach((pt) => p.vertex(pt[0], pt[1]));
-      p.endShape();
 
       p.noStroke();
-      for (let k = 5; k >= 1; k--) {
-        p.fill(255, 190, 80, 20);
-        p.circle(x, y, 11 * k);
-      }
-      p.fill(255, 255, 255);
-      p.circle(x, y, 10);
-
-      p.fill(255);
-      p.textSize(13);
-      p.text(o.name, x + 18, y - 14);
+      p.fill(0, 255, 210, 110);
+      (g.verts || []).forEach(function (v) {
+        p.circle(v[0] * p.width, v[1] * p.height, 2.5);
+      });
     });
 
+    // 4) 被跟踪物体：拖尾 + 脉冲光环 + 标签
+    objs.forEach(function (o, i) {
+      if (o.visible === false) return;
+      const x = o.x * p.width;
+      const y = o.y * p.height;
+      const tr = trails[i] || (trails[i] = []);
+      tr.push([x, y]);
+      if (tr.length > 48) tr.shift();
+
+      p.noFill();
+      p.stroke(255, 170, 60, 70);
+      p.strokeWeight(2);
+      p.beginShape();
+      for (let k = 0; k < tr.length; k++) p.vertex(tr[k][0], tr[k][1]);
+      p.endShape();
+
+      const pulse = 1 + 0.14 * Math.sin((D.t || 0) * 6 + i);
+      p.stroke(255, 200, 90, 210);
+      p.strokeWeight(1.5);
+      p.circle(x, y, 34 * pulse);
+      p.stroke(255, 200, 90, 80);
+      p.circle(x, y, 58 * pulse);
+
+      p.noStroke();
+      p.fill(255, 255, 240);
+      p.circle(x, y, 8);
+
+      p.fill(255, 230, 200, 200);
+      p.textSize(11);
+      p.text(o.name, x + 22, y - 16);
+    });
+
+    // 5) HUD
+    p.noStroke();
     p.fill(200, 230, 255, 190);
-    p.textSize(12);
-    p.text(`frame ${state.frame || 0}   t=${(ctxData.t || 0).toFixed(2)}   tracked=${objs.length}`
-           + `   ${p.width}x${p.height}`, 14, p.height - 14);
+    p.textSize(11);
+    p.text('frame ' + (state.frame || 0) +
+           '   t=' + (D.t || 0).toFixed(2) + 's' +
+           '   tracked ' + objs.length +
+           '   geo ' + geo.length +
+           '   ' + p.width + 'x' + p.height +
+           (tex ? '   tex' : ''), 12, p.height - 12);
   };
 }
 """
@@ -745,6 +766,23 @@ class P5B_OT_new_sketch(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class P5B_OT_reset_sketch(bpy.types.Operator):
+    bl_idname = "p5b.reset_sketch"
+    bl_label = "Reset to Demo"
+    bl_description = "Overwrite this instance's sketch with the built-in demo and run it"
+
+    def execute(self, context):
+        rec = active_record()
+        if rec is None:
+            self.report({"ERROR"}, "no instance")
+            return {"CANCELLED"}
+        text = bpy.data.texts.get(rec.text) or bpy.data.texts.new(rec.text)
+        text.from_string(TEMPLATE)
+        instance_push(rec)
+        self.report({"INFO"}, f"reset {rec.text}")
+        return {"FINISHED"}
+
+
 class P5B_OT_run_sketch(bpy.types.Operator):
     bl_idname = "p5b.run_sketch"
     bl_label = "Run"
@@ -1238,6 +1276,7 @@ class P5B_PT_sketch(bpy.types.Panel):
         if rec is not None:
             layout.label(text=f"text: {rec.text}")
         layout.prop(context.scene, "p5b_auto_run", text="Auto Run on Edit")
+        layout.operator("p5b.reset_sketch", icon="FILE_REFRESH")
         layout.label(text=f"v{st['sketch_version']} · {st['frames']} frames · {st['dropped']} dropped")
 
 
@@ -1328,7 +1367,7 @@ class P5B_PT_text_sidebar(bpy.types.Panel):
 
 classes = (
     P5B_Instance,
-    P5B_OT_start, P5B_OT_stop, P5B_OT_new_sketch, P5B_OT_run_sketch,
+    P5B_OT_start, P5B_OT_stop, P5B_OT_new_sketch, P5B_OT_run_sketch, P5B_OT_reset_sketch,
     P5B_OT_open_host, P5B_OT_close_host,
     P5B_OT_create_window, P5B_OT_show_canvas, P5B_OT_track, P5B_OT_untrack,
     P5B_OT_bind_plane, P5B_OT_feedback, P5B_OT_mark_geo, P5B_OT_unmark_geo,
