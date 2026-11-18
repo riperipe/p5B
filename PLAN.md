@@ -1,56 +1,48 @@
 # p5inBlender — 路线图
 
-目标：把 2D 创意编程（p5.js / three.js / canvas）变成 Blender 里的一等公民：
-在 Blender 里写代码、点运行、在 Image Editor 和任何 UV 映射的模型上看到它；
-并且能逐帧确定性出片。
+把 2D 创意编程（p5.js）变成 Blender 里的一等公民：在 Blender 里写代码、点运行、
+在 Image Editor 和任何 UV 映射的模型上看到它，并且能逐帧确定性出片。
 
 ## 已完成
 
-**M0 — 像素通路**（已验证）
-- TCP + WebSocket 双协议，640x360@60fps 稳定（丢 1/720），720p 上限 127.6 fps
-- 8-bit sRGB Image 字节直通（实测：写 0.5 → 渲回 0.5），色彩顺序坑已钉死
+**M0 — 像素通路** ✅
+- TCP + WebSocket 双协议；640x360@60fps 稳定；720p 上限 ~128 fps
+- 8-bit sRGB 字节直通（实测 0.5 → 0.5）；色彩/顺序坑已钉死
 - UV 窗口平面 + 材质节点树（UV → Mapping → Image → Emission）
 
-**M1 — 在 Blender 里写代码 + Empty 驱动**（已验证）
-- `p5b_sketch.js` Text datablock，Text Editor 侧栏 Run 按钮
-- sketch 热更新（v1 → v2 实测送达）
-- 场景快照下行：`world_to_camera_view` 投影 + `p5b_track` 标记，点精确跟随
-- `http://127.0.0.1:9877/` 直接吐宿主页面，无 CORS、无文件路径问题
+**M1 — 在 Blender 里写代码** ✅
+- Text datablock 写 sketch，点 Run 热更新
+- 场景快照下行：`world_to_camera_view` 投影 + `p5b_track` 标记
+- 宿主页面由插件自己吐（`http://127.0.0.1:<port>/`），无 CORS/路径问题
 
-## 已完成
+**M2 — 拉取式 cook（确定性出片）** ✅
+- v2 帧协议：plane 表 + `req`（0=流帧，>0=cook 应答）
+- `cook_frame(frame)`：请求 → 等待 → 写 Image；同帧重复结果一致
+- `p5b.render_animation`：逐帧 cook + 渲染
+- 多平面（mask → `P5B_mask`）
 
-**M2 — 拉取式 cook（出片的地基）** ✅
-- [x] v2 帧协议：plane 表 + `req` 字段（0=流帧，>0=cook 应答）
-- [x] 下行独立发送线程（不再借帧上行搭车）
-- [x] `cook_frame(frame)`：请求 → 等待 → 写 Image，帧内容可复现
-- [x] `P5B_mask` 图像（mask plane 落地，供材质当遮罩因子）
-- [x] 动画渲染：`p5b.render_animation` 逐帧 cook + 渲染（1–6 帧实测，6 张全不同）
-- [x] 多客户端服务器 + 空闲断连 + 端口残留清理 + WebSocket 分片组包
+**M3 — 参数即通道** ⏸ 暂时移除
+- 做过一版（`@param` → 场景属性 → 可 K 帧/驱动），面板交互不顺，按用户要求先从 UI 移除
+- 代码已删除，等主链路稳定后再回来
 
-验收：同一帧连续 cook 两次，PNG 逐像素一致。**已通过**：
-frame 60 两次 cook 的 md5 同为 `23a81e63d575`，frame 90 / 30 各自不同；
-单次 cook 往返 10–52 ms；mask 平面（640x360, Non-Color, 0–0.996）已落盘为 `P5B_mask`。
+**M3.5 — 真 p5.js** ✅
+- 宿主加载真 p5.js（本地 `host/p5.min.js` → CDN → 明确提示）
+- sketch 用实例模式 `function sketch(p)`，数据走 `p.p5inblender.state`
+- 面板可查 `client_p5`
+
+**M4 — 多实例** ✅ 基本完成
+- [x] `P5B_Instance`：每个实例独立 text / image / material / plane / 端口
+- [x] 多实例同时运行（每实例一个后台浏览器页面），面板列出端口、fps、连接状态
+- [x] 点名字切换活动实例；Start / Stop / Remove 按实例操作
+- [x] 实测：两个实例 59.9 / 61.5 fps，各自画面 md5 不同（互不干扰）
+- [ ] 网络级默认值继承（resolution / pixel_scale）
+- [ ] 一个实例被多个平面共用；实例缩略图
 
 ## 计划
 
-**M3 — 参数即通道** ⏸ 暂时移除
-- 已完成过一版（`// @param` → 场景属性 → 可 K 帧/驱动），但面板显示有坑、交互不顺，
-  按用户决定先从 UI 移除，等主链路稳定后再回来做。
-- 代码里相关的 `parse_params` / `sync_params` / Params 面板已删除。
-
-**M3.5 — 真 p5.js** ✅
-- 宿主改为加载真 p5.js（本地 `host/p5.min.js` → CDN → 提示），sketch 用实例模式 `function sketch(p)`
-- 面板可查 `client_p5` 确认 p5 是否真的加载
-- 仍支持 `p5inblender.state` 快照（跟踪物体 → 屏幕坐标）
-
-**M4 — 实例化**（COP 借鉴 #1、#3、#5）
-- `P5B_Instance`：每个实例独立 image + 参数 + 分辨率覆盖
-- 网络级默认值继承：resolution / pixel_scale / precision
-- 一个实例可被多个平面共用；面板显示实例缩略图（替代 display flag）
-
 **M5 — 二维/三维真正互通**（COP 借鉴 #6、#7）
 - 上游纹理输入：p5 接收 Blender 纹理做反馈绘画
-- 几何下行：顶点/边数据进 sketch，Blender 模型成为二维素材
+- 几何下行：顶点/边进 sketch，Blender 模型成为二维素材
 - 多平面扩展：depth / id / normal
 
 **M6 — 平台与分发**
@@ -60,13 +52,14 @@ frame 60 两次 cook 的 md5 同为 `23a81e63d575`，frame 90 / 30 各自不同�
 ## 明确不做
 
 - 节点式合成 UI（Copernicus 的语义要学，交互形态不学）
-- 把 JS 库"编译进着色器"（GLSL 里没有 JS，这条路不成立）
 - 依赖系统 WebView（Windows/WebKit 双引擎会撕开行为差异）
 
 ## 已知硬约束
 
 - `colorspace_settings` / `alpha_mode` 必须在写像素之前设置，否则缓冲被重置
 - 图像缓冲 bottom-up，canvas top-down，写入前 `[::-1]`
-- 跨平台像素级一致不承诺（GPU 光栅化差异），同平台内可复现
-- 有状态的模拟（matter.js）要能 reset + 定步长重放才能进确定性出片
-- DSH 沙箱禁止 Chromium 多进程命名管道，浏览器端验证需在普通终端跑
+- 浏览器会把大帧拆成 WS 分片，必须按 FIN 组包再解析
+- 浏览器被完全遮挡时 `requestAnimationFrame` 会暂停（页面有定时器兜底）
+- Blender 的 undo 会让 Python 手里指向 Image 的引用失效（每次写入前重新解析）
+- 有状态的模拟要能 reset + 定步长重放，才能进确定性出片
+- 跨平台像素级一致不承诺；同平台内可复现

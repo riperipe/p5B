@@ -28,7 +28,7 @@ from . import live_image, transport, window
 bl_info = {
     "name": "p5inBlender",
     "author": "DeepseekWorkzone",
-    "version": (0, 5, 0),
+    "version": (0, 6, 0),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > p5inBlender",
     "description": "Live 2D canvas as a UV-mapped texture, coded in Blender's text editor",
@@ -75,14 +75,15 @@ def find_browser() -> str | None:
 def launch_host(mode: str = "window", port: int = DEFAULT_PORT):
     """Start the sketch host. mode: 'window' = app window, 'headless' = no window."""
     st = _state
-    proc = st.get("browser_proc")
-    if proc is not None and proc.poll() is None:
-        return proc
+    hosts = st.setdefault("hosts", [])
+    for entry in hosts:
+        if entry["proc"].poll() is None and entry["port"] == port:
+            return entry["proc"]
     exe = find_browser()
     if exe is None:
         st["error"] = "no Chromium-family browser found (Chrome/Edge/Chromium)"
         return None
-    profile = os.path.join(tempfile.gettempdir(), "p5bridge-profile")
+    profile = os.path.join(tempfile.gettempdir(), f"p5bridge-profile-{port}")
     url = f"http://127.0.0.1:{port}/"
     args = [
         exe,
@@ -110,6 +111,7 @@ def launch_host(mode: str = "window", port: int = DEFAULT_PORT):
     except OSError as exc:
         st["error"] = f"launch failed: {exc}"
         return None
+    hosts.append({"proc": proc, "port": port, "mode": mode})
     st["browser_proc"] = proc
     st["browser_mode"] = mode
     return proc
@@ -117,32 +119,40 @@ def launch_host(mode: str = "window", port: int = DEFAULT_PORT):
 
 def close_host() -> bool:
     st = _state
-    proc = st.get("browser_proc")
+    hosts = st.get("hosts") or []
+    st["hosts"] = []
     st["browser_proc"] = None
     st["browser_mode"] = ""
-    if proc is None or proc.poll() is not None:
-        return False
-    try:
-        if sys.platform == "win32":
-            subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
-        else:
-            proc.terminate()
-            proc.wait(timeout=5)
-    except Exception:
+    closed = False
+    for entry in hosts:
+        proc = entry["proc"]
+        if proc.poll() is not None:
+            continue
+        closed = True
         try:
-            proc.kill()
+            if sys.platform == "win32":
+                subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+            else:
+                proc.terminate()
+                proc.wait(timeout=5)
         except Exception:
-            pass
-    return True
+            try:
+                proc.kill()
+            except Exception:
+                pass
+    return closed
 
 
 def host_status() -> dict:
     st = _state
-    proc = st.get("browser_proc")
-    alive = bool(proc is not None and proc.poll() is None)
-    return {"alive": alive, "mode": st.get("browser_mode", "") if alive else "",
-            "pid": proc.pid if alive else None}
+    hosts = [h for h in (st.get("hosts") or []) if h["proc"].poll() is None]
+    last = hosts[-1] if hosts else None
+    return {"alive": bool(hosts),
+            "count": len(hosts),
+            "mode": last["mode"] if last else "",
+            "pid": last["proc"].pid if last else None,
+            "ports": [h["port"] for h in hosts]}
 
 TEMPLATE = r"""// p5b_sketch.js —— 在 Blender 里改，点 Run 生效（真 p5.js 实例模式）
 //
@@ -211,17 +221,11 @@ function sketch(p) {
 """
 
 _state = {
-    "server": None,
-    "live": None,
+    "instances": {},      # name -> runtime dict (server, image, counters)
+    "active": "",
     "fps": 0.0,
-    "frames": 0,
-    "t0": 0.0,
-    "n": 0,
-    "last_seq": -1,
-    "last_size": (0, 0),
-    "error": "",
-    "sketch_version": 0,
     "state": None,
+    "error": "",
     "browser_proc": None,
     "browser_mode": "",
 }
@@ -264,45 +268,162 @@ def build_state(scene) -> dict:
     }
 
 
+# ------------------------------------------------------------------ instances
+def instance_records():
+    return bpy.context.scene.p5b_instances
+
+
+def instance_record(name: str):
+    for rec in instance_records():
+        if rec.name == name:
+            return rec
+    return None
+
+
+def active_record():
+    sc = bpy.context.scene
+    if not len(sc.p5b_instances):
+        return None
+    return sc.p5b_instances[min(max(sc.p5b_active, 0), len(sc.p5b_instances) - 1)]
+
+
+def _runtime(name: str):
+    return _state["instances"].get(name)
+
+
+def _new_runtime(name: str) -> dict:
+    return {"name": name, "server": None, "live": None, "frames": 0, "fps": 0.0,
+            "t0": 0.0, "n": 0, "last_seq": -1, "last_size": (0, 0),
+            "sketch_version": 0, "error": ""}
+
+
+def _ensure_pump():
+    if not bpy.app.timers.is_registered(_pump):
+        bpy.app.timers.register(_pump, first_interval=0.005)
+
+
+def create_instance(name: str, port: int | None = None, with_plane: bool = True):
+    """Create an independent canvas: own text datablock, image, material, plane."""
+    sc = bpy.context.scene
+    rec = sc.p5b_instances.add()
+    rec.name = name
+    base = int(getattr(sc, "p5b_port", DEFAULT_PORT))
+    rec.port = int(port) if port else base + max(len(sc.p5b_instances) - 1, 0)
+    rec.text = f"p5b_sketch_{name}.js"
+    rec.image = f"P5B_live_{name}"
+    rec.material = f"P5B_Canvas_{name}"
+    rec.plane = ""
+    text = bpy.data.texts.get(rec.text) or bpy.data.texts.new(rec.text)
+    if not text.as_string().strip():
+        text.from_string(TEMPLATE)
+    if with_plane:
+        plane = window.create_window_plane(name=f"P5B_Window_{name}", size=1.4,
+                                           location=(0.0, 0.0, 0.0))
+        rec.plane = plane.name
+    return rec
+
+
+def instance_start(rec, width: int | None = None, height: int | None = None) -> bool:
+    sc = bpy.context.scene
+    st = _state
+    rt = _runtime(rec.name)
+    if rt is not None and rt["server"] is not None and rt["server"].running:
+        return True
+    release_stale_port(int(rec.port))
+    srv = transport.FrameServer(port=int(rec.port))
+    if not srv.start():
+        st["error"] = srv.error or "server failed to start"
+        return False
+    rt = _new_runtime(rec.name)
+    rt["server"] = srv
+    rt["live"] = live_image.LiveImage(rec.image or f"P5B_live_{rec.name}",
+                                      int(width or sc.p5b_width), int(height or sc.p5b_height))
+    text = bpy.data.texts.get(rec.text)
+    if text is not None:
+        rt["sketch_version"] += 1
+        srv.publish_sketch(text.as_string(), rt["sketch_version"])
+    plane = bpy.data.objects.get(rec.plane) if rec.plane else None
+    if plane is not None:
+        window.bind_window(plane, rt["live"].image, rec.material or f"P5B_Canvas_{rec.name}")
+    st["instances"][rec.name] = rt
+    st["error"] = ""
+    _ensure_pump()
+    return True
+
+
+def instance_stop(rec) -> None:
+    rt = _state["instances"].pop(rec.name, None)
+    if rt is not None and rt["server"] is not None:
+        rt["server"].stop()
+
+
+def instance_push(rec) -> int:
+    rt = _runtime(rec.name)
+    if rt is None:
+        return 0
+    text = bpy.data.texts.get(rec.text)
+    if text is None:
+        return 0
+    rt["sketch_version"] += 1
+    if rt["server"] is not None:
+        rt["server"].publish_sketch(text.as_string(), rt["sketch_version"])
+    return rt["sketch_version"]
+
+
 def _pump():
     st = _state
-    srv = st["server"]
-    if srv is None:
-        return None
-    pushed = 0
-    while pushed < 3:
-        try:
-            seq, w, h, planes = srv.frames.get_nowait()
-        except queue.Empty:
-            break
-        try:
-            st["live"].push_planes(planes, w, h)
-        except Exception as exc:
-            st["error"] = f"push failed: {exc}"
-            break
-        st["last_seq"] = seq
-        st["last_size"] = (w, h)
-        pushed += 1
-    if pushed:
-        st["frames"] += pushed
-        st["n"] += pushed
-        now = time.perf_counter()
-        if st["t0"] == 0.0:
-            st["t0"] = now
-        dt = now - st["t0"]
-        if dt >= 0.5:
-            st["fps"] = st["n"] / dt
-            st["n"] = 0
-            st["t0"] = now
+    scene = bpy.context.scene
+    now = time.perf_counter()
+    pushed_total = 0
+
+    for rt in list(st["instances"].values()):
+        srv = rt["server"]
+        if srv is None:
+            continue
+        pushed = 0
+        while pushed < 3:
+            try:
+                seq, w, h, planes = srv.frames.get_nowait()
+            except queue.Empty:
+                break
+            try:
+                if rt["live"] is None:
+                    break
+                rt["live"].push_planes(planes, w, h)
+            except Exception as exc:
+                rt["error"] = f"push failed: {exc}"
+                break
+            rt["last_seq"] = seq
+            rt["last_size"] = (w, h)
+            pushed += 1
+        if pushed:
+            rt["frames"] += pushed
+            rt["n"] += pushed
+            if rt["t0"] == 0.0:
+                rt["t0"] = now
+            dt = now - rt["t0"]
+            if dt >= 0.5:
+                rt["fps"] = rt["n"] / dt
+                rt["n"] = 0
+                rt["t0"] = now
+            pushed_total += pushed
+
+    if pushed_total:
         _tag_redraw()
-    # scene snapshot for the sketch (cheap: a handful of objects)
+
     try:
-        state = build_state(bpy.context.scene)
+        state = build_state(scene)
         st["state"] = state
-        srv.publish_state(json.dumps(state))
+        payload = json.dumps(state)
+        for rt in st["instances"].values():
+            if rt["server"] is not None:
+                rt["server"].publish_state(payload)
     except Exception as exc:
         st["error"] = f"state failed: {exc}"
-    return 0.0 if pushed else 0.004
+
+    if not st["instances"]:
+        return None
+    return 0.0 if pushed_total else 0.004
 
 
 def release_stale_port(port: int) -> int:
@@ -328,85 +449,102 @@ def release_stale_port(port: int) -> int:
     return closed
 
 
+def ensure_default_instance():
+    """The demo scene ships with P5B_live / p5b_sketch.js already; adopt them."""
+    sc = bpy.context.scene
+    if len(sc.p5b_instances):
+        return active_record()
+    rec = sc.p5b_instances.add()
+    rec.name = "canvas"
+    rec.port = int(getattr(sc, "p5b_port", DEFAULT_PORT))
+    rec.text = SKETCH_NAME
+    rec.image = "P5B_live"
+    rec.material = "P5B_Canvas"
+    rec.plane = "P5B_Window"
+    if bpy.data.texts.get(rec.text) is None:
+        bpy.data.texts.new(rec.text).from_string(TEMPLATE)
+    return rec
+
+
 def start_bridge(port: int = DEFAULT_PORT, width: int = 640, height: int = 360, host: str = "127.0.0.1"):
-    st = _state
-    if st["server"] is not None and st["server"].running:
-        return True
-    release_stale_port(port)
-    srv = transport.FrameServer(host=host, port=port)
-    if not srv.start():
-        st["error"] = srv.error or "server failed to start"
+    """Start the active instance (creating a default record if needed)."""
+    rec = ensure_default_instance()
+    if rec is None:
+        _state["error"] = "no instance"
         return False
-    st["server"] = srv
-    st["live"] = live_image.LiveImage("P5B_live", width, height)
-    st["frames"] = 0
-    st["n"] = 0
-    st["t0"] = 0.0
-    st["error"] = ""
-    # publish whatever sketch already exists so a fresh browser gets it on connect
-    text = bpy.data.texts.get(SKETCH_NAME)
-    if text is not None:
-        st["sketch_version"] += 1
-        srv.publish_sketch(text.as_string(), st["sketch_version"])
-    if not bpy.app.timers.is_registered(_pump):
-        bpy.app.timers.register(_pump, first_interval=0.005)
-    return True
+    ok = instance_start(rec, width, height)
+    if ok:
+        _state["active"] = rec.name
+    return ok
 
 
 def stop_bridge():
-    st = _state
+    for rt in list(_state["instances"].values()):
+        if rt["server"] is not None:
+            rt["server"].stop()
+    _state["instances"].clear()
     close_host()
-    if st["server"] is not None:
-        st["server"].stop()
-        st["server"] = None
     if bpy.app.timers.is_registered(_pump):
         bpy.app.timers.unregister(_pump)
-    st["fps"] = 0.0
 
 
 def push_sketch() -> int:
-    st = _state
-    text = bpy.data.texts.get(SKETCH_NAME)
-    if text is None:
+    rec = active_record()
+    if rec is None:
         return 0
-    st["sketch_version"] += 1
-    if st["server"] is not None:
-        st["server"].publish_sketch(text.as_string(), st["sketch_version"])
-    return st["sketch_version"]
+    return instance_push(rec)
 
 
 def stats_snapshot():
     st = _state
-    srv = st["server"]
+    rec = active_record()
+    rt = _runtime(rec.name) if rec is not None else None
+    srv = rt["server"] if rt else None
+    rows = []
+    for r in instance_records():
+        rrt = _runtime(r.name)
+        rsrv = rrt["server"] if rrt else None
+        rows.append({
+            "name": r.name,
+            "port": int(r.port),
+            "running": bool(rsrv and rsrv.running),
+            "connected": bool(rsrv and rsrv.connected),
+            "fps": round(rrt["fps"], 1) if rrt else 0.0,
+        })
     return {
         "running": bool(srv and srv.running),
         "connected": bool(srv and srv.connected),
         "protocol": (srv.stats["protocol"] if srv else None),
-        "port": (srv.port if srv else None),
-        "frames": st["frames"],
-        "fps": round(st["fps"], 2),
+        "port": (int(rec.port) if rec is not None else None),
+        "frames": (rt["frames"] if rt else 0),
+        "fps": round(rt["fps"], 2) if rt else 0.0,
         "dropped": (srv.stats["dropped"] if srv else 0),
         "cooks": (srv.stats["cooks"] if srv else 0),
         "silent_for": (srv.silent_for if srv else 0.0),
         "clients": (srv.stats["clients"] if srv else 0),
         "host": host_status(),
-        "sketch_version": st["sketch_version"],
+        "sketch_version": (rt["sketch_version"] if rt else 0),
         "tracked": len((st["state"] or {}).get("objects", [])),
+        "client_p5": (srv.stats.get("client_p5") if srv else None),
+        "instance": (rec.name if rec is not None else None),
+        "instances": rows,
         "error": st["error"] or (srv.error if srv else ""),
     }
 
 
 def cook_frame(frame: int | None = None, timeout: float = 5.0) -> int:
-    """Ask the sketch for one specific frame and wait for it (blocking, main thread).
+    """Ask the active sketch for one specific frame and wait for it (blocking).
 
     This is the pull-based half of the model: the browser renders exactly on
     request, so a frame is a pure function of (sketch version, frame, state)
     and repeating it gives the same pixels. Returns the frame cooked, or -1.
     """
     st = _state
-    srv = st["server"]
-    if srv is None or not srv.connected or st["live"] is None:
+    rec = active_record()
+    rt = _runtime(rec.name) if rec is not None else None
+    if rt is None or rt["server"] is None or not rt["server"].connected or rt["live"] is None:
         return -1
+    srv = rt["server"]
     scene = bpy.context.scene
     target = scene.frame_current if frame is None else int(frame)
     scene.frame_set(target)
@@ -426,11 +564,10 @@ def cook_frame(frame: int | None = None, timeout: float = 5.0) -> int:
         st["error"] = f"cook timeout for frame {target}"
         return -1
     w, h, planes = result
-    st["live"].push_planes(planes, w, h)
+    rt["live"].push_planes(planes, w, h)
     st["state"] = state
     _tag_redraw()
     return target
-
 
 # --------------------------------------------------------------------- operators
 class P5B_OT_start(bpy.types.Operator):
@@ -518,12 +655,15 @@ class P5B_OT_create_window(bpy.types.Operator):
 
     def execute(self, context):
         st = _state
-        if st["live"] is None:
-            if not start_bridge(int(context.scene.p5b_port), int(context.scene.p5b_width), int(context.scene.p5b_height)):
+        rec = active_record()
+        rt = _runtime(rec.name) if rec is not None else None
+        if rt is None or rt["live"] is None:
+            if not start_bridge(0, int(context.scene.p5b_width), int(context.scene.p5b_height)):
                 self.report({"ERROR"}, st["error"])
                 return {"CANCELLED"}
+            rt = _runtime(active_record().name)
         ob = window.create_window_plane()
-        window.bind_window(ob, st["live"].image)
+        window.bind_window(ob, rt["live"].image)
         for o in context.selected_objects:
             o.select_set(False)
         ob.select_set(True)
@@ -536,8 +676,9 @@ class P5B_OT_show_canvas(bpy.types.Operator):
     bl_label = "Show Live Canvas"
 
     def execute(self, context):
-        st = _state
-        if st["live"] is None:
+        rec = active_record()
+        rt = _runtime(rec.name) if rec is not None else None
+        if rt is None or rt["live"] is None:
             self.report({"ERROR"}, "start the receiver first")
             return {"CANCELLED"}
         area = context.area
@@ -546,7 +687,7 @@ class P5B_OT_show_canvas(bpy.types.Operator):
             return {"CANCELLED"}
         area.type = "IMAGE_EDITOR"
         space = area.spaces.active
-        space.image = st["live"].image
+        space.image = rt["live"].image
         space.ui_mode = "VIEW"
         return {"FINISHED"}
 
@@ -599,7 +740,9 @@ class P5B_OT_open_host(bpy.types.Operator):
             if not start_bridge(int(sc.p5b_port), int(sc.p5b_width), int(sc.p5b_height)):
                 self.report({"ERROR"}, _state["error"])
                 return {"CANCELLED"}
-        proc = launch_host(self.mode, int(sc.p5b_port))
+        rec = active_record()
+        port = int(rec.port) if rec is not None else int(sc.p5b_port)
+        proc = launch_host(self.mode, port)
         if proc is None:
             self.report({"ERROR"}, _state["error"])
             return {"CANCELLED"}
@@ -682,6 +825,104 @@ class P5B_OT_cook_render(bpy.types.Operator):
         sc.render.filepath = bpy.path.abspath("//p5b_frame_")
         bpy.ops.render.render(write_still=True)
         self.report({"INFO"}, "rendered via cook")
+        return {"FINISHED"}
+
+
+class P5B_Instance(bpy.types.PropertyGroup):
+    """Persistent record of one canvas: where its sketch, image and plane live."""
+
+    port: bpy.props.IntProperty(name="Port", default=DEFAULT_PORT, min=1024, max=65535)
+    text: bpy.props.StringProperty(name="Sketch", default="")
+    image: bpy.props.StringProperty(name="Image", default="")
+    material: bpy.props.StringProperty(name="Material", default="")
+    plane: bpy.props.StringProperty(name="Plane", default="")
+
+
+class P5B_OT_instance_new(bpy.types.Operator):
+    bl_idname = "p5b.instance_new"
+    bl_label = "New Instance"
+    bl_description = "Create an independent canvas (own sketch, image, material, plane)"
+
+    def execute(self, context):
+        sc = context.scene
+        base = f"canvas{len(sc.p5b_instances) + 1}"
+        name, i = base, 2
+        while instance_record(name) is not None:
+            name = f"{base}{i}"
+            i += 1
+        rec = create_instance(name)
+        ok = instance_start(rec)
+        sc.p5b_active = len(sc.p5b_instances) - 1
+        _state["active"] = rec.name
+        if ok:
+            self.report({"INFO"}, f"{name} on port {int(rec.port)}")
+        else:
+            self.report({"ERROR"}, _state["error"] or "start failed")
+        return {"FINISHED"} if ok else {"CANCELLED"}
+
+
+class P5B_OT_instance_activate(bpy.types.Operator):
+    bl_idname = "p5b.instance_activate"
+    bl_label = "Activate Instance"
+
+    index: bpy.props.IntProperty()
+
+    def execute(self, context):
+        sc = context.scene
+        if 0 <= self.index < len(sc.p5b_instances):
+            sc.p5b_active = self.index
+            _state["active"] = sc.p5b_instances[self.index].name
+        return {"FINISHED"}
+
+
+class P5B_OT_instance_start(bpy.types.Operator):
+    bl_idname = "p5b.instance_start"
+    bl_label = "Start Instance"
+
+    name: bpy.props.StringProperty()
+
+    def execute(self, context):
+        rec = instance_record(self.name) or active_record()
+        if rec is None:
+            return {"CANCELLED"}
+        ok = instance_start(rec)
+        if ok:
+            _state["active"] = rec.name
+        self.report({"INFO"} if ok else {"ERROR"}, f"{rec.name} : {int(rec.port)}")
+        return {"FINISHED"} if ok else {"CANCELLED"}
+
+
+class P5B_OT_instance_stop(bpy.types.Operator):
+    bl_idname = "p5b.instance_stop"
+    bl_label = "Stop Instance"
+
+    name: bpy.props.StringProperty()
+
+    def execute(self, context):
+        rec = instance_record(self.name) or active_record()
+        if rec is not None:
+            instance_stop(rec)
+        return {"FINISHED"}
+
+
+class P5B_OT_instance_remove(bpy.types.Operator):
+    bl_idname = "p5b.instance_remove"
+    bl_label = "Remove Instance"
+
+    name: bpy.props.StringProperty()
+
+    def execute(self, context):
+        sc = context.scene
+        rec = instance_record(self.name) or active_record()
+        if rec is None:
+            return {"CANCELLED"}
+        instance_stop(rec)
+        target = rec.name
+        for i in range(len(sc.p5b_instances)):
+            if sc.p5b_instances[i].name == target:
+                sc.p5b_instances.remove(i)
+                break
+        sc.p5b_active = max(0, min(sc.p5b_active, len(sc.p5b_instances) - 1))
         return {"FINISHED"}
 
 
@@ -831,6 +1072,34 @@ class P5B_PT_render(bpy.types.Panel):
         layout.label(text=f"{st['cooks']} cook request(s)")
 
 
+class P5B_PT_instances(bpy.types.Panel):
+    bl_label = "Instances"
+    bl_idname = "P5B_PT_instances"
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_category = "p5inBlender"
+
+    def draw(self, context):
+        sc = context.scene
+        st = stats_snapshot()
+        layout = self.layout
+        layout.operator("p5b.instance_new", text="New Instance", icon="ADD")
+        if not st["instances"]:
+            layout.label(text="no instance yet — press Start")
+        for i, row in enumerate(st["instances"]):
+            line = layout.row(align=True)
+            op = line.operator("p5b.instance_activate", text=row["name"], emboss=False,
+                               icon="RADIOBUT_ON" if i == sc.p5b_active else "RADIOBUT_OFF")
+            op.index = i
+            line.label(text=f"{row['port']} · " + (f"{row['fps']}fps" if row["running"] else "off"))
+            op = line.operator("p5b.instance_start", text="", icon="PLAY")
+            op.name = row["name"]
+            op = line.operator("p5b.instance_stop", text="", icon="SNAP_FACE")
+            op.name = row["name"]
+            op = line.operator("p5b.instance_remove", text="", icon="X")
+            op.name = row["name"]
+
+
 class P5B_PT_text_sidebar(bpy.types.Panel):
     """Run button right next to the code."""
 
@@ -850,12 +1119,15 @@ class P5B_PT_text_sidebar(bpy.types.Panel):
 
 
 classes = (
+    P5B_Instance,
     P5B_OT_start, P5B_OT_stop, P5B_OT_new_sketch, P5B_OT_run_sketch,
     P5B_OT_open_host, P5B_OT_close_host,
     P5B_OT_create_window, P5B_OT_show_canvas, P5B_OT_track, P5B_OT_untrack,
     P5B_OT_cook_still, P5B_OT_cook_render, P5B_OT_render_animation,
+    P5B_OT_instance_new, P5B_OT_instance_activate, P5B_OT_instance_start,
+    P5B_OT_instance_stop, P5B_OT_instance_remove,
     P5B_PT_panel, P5B_PT_canvas, P5B_PT_sketch, P5B_PT_tracking, P5B_PT_render,
-    P5B_PT_text_sidebar, P5B_MT_menu,
+    P5B_PT_instances, P5B_PT_text_sidebar, P5B_MT_menu,
 )
 
 
@@ -881,6 +1153,10 @@ def register():
     ):
         if not hasattr(bpy.types.Scene, prop):
             setattr(bpy.types.Scene, prop, bpy.props.IntProperty(**kwargs))
+    if not hasattr(bpy.types.Scene, "p5b_instances"):
+        bpy.types.Scene.p5b_instances = bpy.props.CollectionProperty(type=P5B_Instance)
+    if not hasattr(bpy.types.Scene, "p5b_active"):
+        bpy.types.Scene.p5b_active = bpy.props.IntProperty(name="Active", default=0)
     if _on_load_post not in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.append(_on_load_post)
     try:
@@ -903,6 +1179,6 @@ def unregister():
             bpy.utils.unregister_class(cls)
         except RuntimeError:
             pass
-    for prop in ("p5b_port", "p5b_width", "p5b_height"):
+    for prop in ("p5b_port", "p5b_width", "p5b_height", "p5b_instances", "p5b_active"):
         if hasattr(bpy.types.Scene, prop):
             delattr(bpy.types.Scene, prop)

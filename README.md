@@ -148,6 +148,19 @@ state.objects[] = { name, x, y, depth, visible }   // x/y 已归一化到 0..1
 - p5 的 `WEBGL` 模式读不到像素（`getImageData` 对 WebGL 画布返回空），用默认 2D 模式
 - 改完代码点 `Run` 即可热更新，不用重启 Blender
 
+## 多实例（M4）
+
+一个场景里可以有多块互不干扰的画布，每块有自己的 sketch 文本、图像、材质、平面和端口。
+
+- 面板 `Instances`：列出每个实例（名字 · 端口 · fps），点名字切换"活动实例"
+- `New Instance` 自动建：`p5b_sketch_canvas2.js` + `P5B_live_canvas2` + `P5B_Canvas_canvas2` + `P5B_Window_canvas2`，端口顺延（9877 → 9878 …）
+- 每行的 ▶ / ■ / ✕ 分别启动、停止、删除该实例
+- `Run`、`Cook`、`Render Animation` 都作用于**活动实例**
+- 每个实例需要一个画布客户端：`Canvas → Open/Background` 会为活动实例打开对应端口的页面
+
+实测：两个实例同时 60 fps；把第二个实例的 sketch 改成红底大圆点后，两块画面的 md5 不同，
+说明从 sketch 到材质完全隔离。
+
 ## 默认后台运行（没有窗口）
 
 插件启用后不占任何资源；点一次 **Start**，三件事一起做：
