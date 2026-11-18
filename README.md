@@ -1,0 +1,169 @@
+# p5inBlender
+
+把浏览器里的一张 2D 画布（p5.js / canvas 2D / three.js）当作 Blender 的实时纹理，
+UV 岛就是这扇"窗口"，着色器在它上面继续加工。
+
+```
+sketch (canvas)  --WebSocket/TCP binary-->  Blender 主线程 timer
+      |                                          |
+   getImageData                             Image datablock (8-bit, sRGB)
+      |                                          |
+      +-------- 20B header + RGBA8 ------+   Image Texture (Vector <- UV)
+                                                 |
+                                          Emission / 你接的任何着色器
+```
+
+## 为什么是"像素"而不是"把 p5 装进着色器"
+
+GLSL 里没有 JS。五个库只能跑在浏览器（Chromium 内核）里，进着色器的是它们的
+像素输出和参数。所以插件由三层组成：JS 运行时 / 传输 / Blender 侧 Image+UV+材质。
+
+## 已实测结论（Blender 5.1.1）
+
+| 写法 | 渲染回来的值 | 结论 |
+|---|---|---|
+| 8-bit image + colorspace `sRGB`，写入 0.5 | 0.5（128/255） | ✅ 字节直通，就用这个 |
+| 8-bit image + colorspace `Non-Color`，写入 0.5 | 0.7379（188/255） | ❌ 会整体偏亮 |
+| float image + colorspace `sRGB`，写入 0.5 | 0.7379（188/255） | ❌ 浮点缓冲按线性解释 |
+
+两条硬性顺序要求：
+
+1. `colorspace_settings` / `alpha_mode` 必须在**写像素之前**设置，之后设置会重载缓冲、把数据清空。
+2. 图像缓冲是 bottom-up，canvas 是 top-down，写入前要 `[::-1]`。
+
+## 性能（纯写入，不含网络）
+
+| 分辨率 | `pixels.foreach_set` |
+|---|---|
+| 640x360 | 0.69 ms |
+| 1280x720 | 2.44 ms |
+| 1920x1080 | 5.55 ms |
+
+## M0 端到端实测（Blender 5.1.1 / Python 3.13.9 / Windows，同机回环）
+
+| 场景 | 源速率 | Blender 侧 | 丢帧 |
+|---|---|---|---|
+| 640x360，源锁 60fps | 60.0 fps（55.3 MB/s） | **59.5 fps 稳定** | 1 / 720 |
+| 1280x720，源不限速 | 373.6 fps（1.38 GB/s） | **127.6 fps 上限** | 按设计丢旧帧 |
+| 320x180，WebSocket（浏览器等价路径） | 36.7 fps | 120/120 全部到达 | 0 |
+
+- 720p 的 127.6 fps 上限 ≈ 7.8 ms/帧，含 numpy 转换 + `foreach_set` + `image.update()` + 重绘；**瓶颈不在网络，在 Python 侧转换与 GPU 重传**。
+- 队列策略是"丢旧帧、永远显示最新帧"，所以源再快也不会积压成延迟。
+- 浏览器端在本会话里无法验证：DSH 沙箱禁止 Chromium 的多进程命名管道（`mojo platform_channel` 拒绝访问）。需要在普通终端里启动 Edge/Chrome。
+
+## M2：拉取式 cook（确定性出片）
+
+除了流式预览，现在还能"按帧要画面"：
+
+```python
+p5inBlender.cook_frame(90)      # 让浏览器渲染第 90 帧 → 等回来 → 写进 P5B_live
+```
+
+- 协议升到 v2：`magic "P5B2" | w | h | seq | req | nplanes | 0` + plane 表 + 负载
+  （`req == 0` 是流帧，`req > 0` 是 cook 应答；v1 仍然兼容）
+- 下行有独立发送线程，sketch / state / cook 请求不再借帧上行搭车
+- `mask` 平面会落到 `P5B_mask`（Non-Color），可以当材质遮罩因子
+- 实测：frame 60 连续 cook 两次，md5 均为 `23a81e63d575`；frame 90 / 30 各不相同；
+  单次往返 10–52 ms
+
+## 踩过的坑（都是实测，别再踩回去）
+
+**1. 浏览器会把大帧拆成分片。** Node 的 WebSocket 实现一条消息就是一条帧，所以服务端一直没暴露问题；
+真浏览器遇到 ~900KB 的帧会发 `FIN=0` 的二进制分片 + 若干 continuation 帧。早期实现把
+每片当整帧解析，于是每一帧都是"头写着 640x360、实际只有 40KB"，全部判废，面板显示
+`connected` 但 `received = 0`。修法：按 `FIN` 位和 `opcode 0x0` 组包，齐了再解析。
+
+**2. Image 的 colorspace 要在写像素之前设置。** 之后再改会重载缓冲，把数据清空。
+
+**3. 有关键帧的物体，拖动会被动画覆盖。** 拖 `P5B_Tracker` 时会弹回关键帧位置，
+看起来像"跟随失效"。要拖动就先 `animation_data_clear()`。
+
+**4. 重复的监听 socket 会静默抢走连接。** 开发期热重载后，旧模块的 accept 线程还吊着 socket，
+`SO_REUSEADDR` 允许再绑一个，于是出现两个 `LISTENING`，新连接可能落到死掉的那个上。
+现在 Windows 用 `SO_EXCLUSIVEADDRUSE`，并在启动时清掉本进程绑定该端口的残留 socket。
+
+**5. 浏览器被完全遮挡时 `requestAnimationFrame` 会停。** 页面用 100ms 定时器兜底；
+用 `tools/open_host.cmd` 启动会额外带上绕开遮挡降频的参数。
+
+**6. Blender 的 undo 会让 Python 手里指向 Image 的引用失效。** 症状极具误导性：浏览器还在
+以 60fps 发包、服务器 `received` 一直涨，但 Image 停在旧画面不动，面板报
+`push failed: StructRNA of type Image has been removed`。
+现在每次写入前都会按名字重新解析 datablock，undo 之后下一帧自动恢复。
+
+**7. 端口是场景属性，不是常量。** 面板里改过端口后，接收端和浏览器都会跟着变；
+如果手动打开 `127.0.0.1:9877` 而属性已经变成别的值，就会连不上。看面板 `Canvas` 里那一行地址。
+
+## 安装 / 更新
+
+本包已安装到 Blender 的用户 addons 目录（`%APPDATA%\Blender Foundation\Blender\5.1\scripts\addons\p5inBlender`），
+并在偏好设置里启用，**重启 Blender 自动加载**（默认不启动，点 Start 才跑）。
+
+手工安装：`Edit > Preferences > Add-ons > Install from Disk`，选
+`p5inBlender-0.3.0.zip`（zip 根目录就是 `p5inBlender/`，可直接被 Blender 识别）。
+
+更新流程：
+
+1. 在工作区改完源码
+2. 覆盖 addons 目录里的副本
+3. 偏好设置里 disable → enable
+4. `git add -A && git commit -m "vX.Y.Z: ..." && git tag vX.Y.Z`
+
+## 默认后台运行（没有窗口）
+
+插件启用后不占任何资源；点一次 **Start**，三件事一起做：
+
+1. 起接收端（`127.0.0.1:9877`）
+2. 把 Text Editor 里的 `p5b_sketch.js` 推给画布
+3. 用 `--headless=new` 在**后台**启动浏览器，不出现任何窗口
+
+所以插件效果照常（Image Editor 和 UV 模型都实时更新），桌面上什么都没有。
+需要交互（鼠标/键盘给 sketch 用）时，在 `Canvas` 里点 `Open` 换成窗口模式。
+`Stop` 全部关掉；加载/新建文件时会自动 `stop_bridge()`，不会把浏览器带进下一个文件。
+
+### N 面板结构
+
+侧栏分类 `p5inBlender` 下**只有一层子层级**：五个平级面板，彼此没有父子关系，
+每个面板内部只放「一行按钮 / 一行标签」，不再嵌套 box 或子面板。
+
+```
+p5inBlender  状态行 + Start / Stop          （默认展开）
+Canvas       Show / Window Plane            （默认折叠）
+             Open / Background / Close
+             端口 W H · 地址
+Sketch       Run / New · 版本与帧数          （默认折叠）
+Tracking     Track Selected / Untrack · 数量 （默认折叠）
+Render       Cook / Cook + Render           （默认折叠）
+             Render Animation · cook 次数
+```
+
+Text Editor 侧栏另有一个精简版：Run / New + 状态，同样只有一层。
+
+## 渲染动画（逐帧确定性出片）
+
+```
+p5b.render_animation
+```
+
+对场景帧区间逐帧：`cook_frame(N)` → 渲染该帧 → 落到 `//p5b_anim/0001.png`
+（文件未保存时落到系统临时目录）。实测 1–6 帧渲染出 6 张互不相同的图。
+
+## 运行
+
+```powershell
+# 1. Blender 里（或经 DSH bridge）加载插件
+python -c "import sys; sys.path.insert(0, r'D:\Deepseek\DeepseekWorkzone01'); import p5inBlender; p5inBlender.register()"
+p5inBlender.start_bridge(9877, 640, 360)
+
+# 2. 起一个源
+& "D:\Anzhuang\Blender Foundation\Blender 5.1\5.1\python\bin\python.exe" p5inBlender\tools\sender.py --seconds 10
+& "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" p5inBlender\host\index.html
+```
+
+## 文件
+
+- `__init__.py` — 插件入口、面板、timer 泵
+- `transport.py` — TCP + WebSocket 接收端（只入队，不碰 bpy）
+- `live_image.py` — Image 写入与色彩规则
+- `window.py` — UV 窗口平面与材质节点树
+- `host/index.html` — 浏览器端 sketch 宿主
+- `tools/sender.py` — 无浏览器时的合成帧源

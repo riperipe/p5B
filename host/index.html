@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>p5inBlender — live sketch host</title>
+<style>
+  html,body{margin:0;height:100%;background:#0b0c10;color:#c9c9d4;font:13px/1.5 ui-monospace,Menlo,Consolas,monospace;overflow:hidden}
+  #wrap{display:flex;flex-direction:column;height:100%}
+  #hud{padding:6px 12px;display:flex;gap:16px;align-items:center;border-bottom:1px solid #22232d;background:#101218;flex-wrap:wrap}
+  #stage{flex:1;display:flex;align-items:center;justify-content:center;min-height:0}
+  canvas{max-width:100%;max-height:100%;image-rendering:pixelated;box-shadow:0 0 0 1px #232533}
+  .bad{color:#f88}
+  .good{color:#8f8}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="hud">
+    <span>p5 bridge</span>
+    <span id="ws">ws: …</span>
+    <span id="ver">sketch: –</span>
+    <span id="fps">fps: –</span>
+    <span id="sent">sent: –</span>
+    <span id="objs">objects: –</span>
+    <span id="vis">tab: visible</span>
+    <span id="mode">mode: stream</span>
+  </div>
+  <div id="stage"><canvas id="c" width="640" height="360"></canvas></div>
+</div>
+<script>
+// 页面由 Blender 侧直接吐出（http://127.0.0.1:9877/），WS 用同源地址。
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d', { willReadFrequently: true });
+const $ = (id) => document.getElementById(id);
+const hud = { ws: $('ws'), ver: $('ver'), fps: $('fps'), sent: $('sent'),
+              objs: $('objs'), vis: $('vis'), mode: $('mode') };
+
+let api = null;
+let env = { canvas, ctx, w: canvas.width, h: canvas.height, t: 0, frame: 0, state: { objects: [] } };
+let lastState = { type: 'state', frame: 0, t: 0, objects: [] };
+let ws = null, sent = 0, sentT0 = performance.now(), totalSent = 0, lastStep = 0;
+
+// ------------------------------------------------------------------ transport
+function connect() {
+  ws = new WebSocket(`ws://${location.host}/`);
+  ws.binaryType = 'arraybuffer';
+  ws.onopen = () => {
+    hud.ws.textContent = 'ws: connected'; hud.ws.className = 'good';
+    ws.send(JSON.stringify({ type: 'want_sketch' }));
+    ws.send(JSON.stringify({ type: 'ready' }));
+  };
+  ws.onmessage = (ev) => {
+    if (typeof ev.data !== 'string') return;
+    let msg; try { msg = JSON.parse(ev.data); } catch { return; }
+    if (msg.type === 'sketch') loadSketch(msg.source, msg.version);
+    else if (msg.type === 'state') {
+      lastState = msg;
+      hud.objs.textContent = `objects: ${(msg.objects || []).length}`;
+    } else if (msg.type === 'cook') {
+      hud.mode.textContent = `mode: cook #${msg.id}`;
+      if (msg.w && msg.h && (msg.w !== canvas.width || msg.h !== canvas.height)) {
+        canvas.width = msg.w; canvas.height = msg.h;
+      }
+      try { renderWith(msg.state || lastState, msg.t || 0); } catch (err) { console.error(err); }
+      sendFrame(msg.id);
+    }
+  };
+  ws.onclose = () => {
+    hud.ws.textContent = 'ws: closed, retrying…'; hud.ws.className = 'bad';
+    setTimeout(connect, 700);
+  };
+  ws.onerror = () => { hud.ws.textContent = 'ws: error'; hud.ws.className = 'bad'; };
+}
+connect();
+
+// v2 帧：header + plane 表 + 负载
+function buildFrame(seq, req) {
+  const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const planes = [{ name: 'rgba', channels: 4, data: new Uint8Array(img.data.buffer) }];
+  const hdrLen = 24 + planes.length * 9;
+  const total = planes.reduce((a, p) => a + p.data.length, 0);
+  const out = new Uint8Array(hdrLen + total);
+  const dv = new DataView(out.buffer);
+  out.set([0x50, 0x35, 0x42, 0x32], 0);            // "P5B2"
+  dv.setUint32(4, canvas.width, true);
+  dv.setUint32(8, canvas.height, true);
+  dv.setUint32(12, seq, true);
+  dv.setUint32(16, req, true);
+  dv.setUint16(20, planes.length, true);
+  dv.setUint16(22, 0, true);
+  let off = 24;
+  for (const p of planes) {
+    for (let i = 0; i < 4; i++) out[off + i] = p.name.charCodeAt(i) || 0;
+    off += 4; out[off] = p.channels; off += 1;
+    dv.setUint32(off, p.data.length, true); off += 4;
+  }
+  for (const p of planes) { out.set(p.data, off); off += p.data.length; }
+  return out;
+}
+
+function sendFrame(req) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  if (ws.bufferedAmount > 4 * 1024 * 1024) return;   // 背压：宁可丢帧
+  ws.send(buildFrame(sent++, req || 0));
+  totalSent++;
+  hud.sent.textContent = `sent: ${totalSent}`;
+  const now = performance.now();
+  if (now - sentT0 > 500) {
+    hud.fps.textContent = `fps: ${(sent * 1000 / (now - sentT0)).toFixed(1)}`;
+    sent = 0; sentT0 = now;
+  }
+}
+
+// --------------------------------------------------------------------- sketch
+function loadSketch(source, ver) {
+  hud.ver.textContent = `sketch: v${ver}`;
+  try {
+    const factory = new Function(
+      source + '\n;return { setup: typeof setup === "function" ? setup : null,' +
+      ' draw: typeof draw === "function" ? draw : null };',
+    );
+    api = factory();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    env = { canvas, ctx, w: canvas.width, h: canvas.height, t: 0, frame: 0, state: lastState };
+    if (api.setup) api.setup(env);
+  } catch (err) {
+    api = null; drawError(err); console.error(err);
+  }
+}
+
+function drawError(err) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = '#1a0d10'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#ff7b7b'; ctx.font = '14px ui-monospace, monospace';
+  ctx.fillText('sketch error:', 20, 40);
+  ctx.fillText(String((err && err.message) || err).slice(0, 120), 20, 66);
+}
+
+function placeholder() {
+  ctx.fillStyle = '#0b0c10'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#4c5566'; ctx.font = '14px ui-monospace, monospace';
+  ctx.fillText('waiting for sketch from Blender…', 20, 40);
+  ctx.fillText('Blender: p5inBlender 面板 → New Sketch → Run', 20, 64);
+  ctx.fillText(`server: ${location.host}`, 20, 88);
+}
+
+function renderWith(state, t) {
+  env.w = canvas.width; env.h = canvas.height;
+  env.state = state || { objects: [] };
+  env.t = t || 0;
+  env.frame = (state && state.frame) || 0;
+  if (!api) { placeholder(); return; }
+  if (!api.draw) return;
+  api.draw(env);
+}
+
+// ------------------------------------------------------------------- main loop
+function step() {
+  lastStep = performance.now();
+  try {
+    renderWith(lastState, lastState.t || 0);
+    sendFrame(0);
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+function tick() {
+  step();
+  requestAnimationFrame(tick);   // 即使 step 抛异常也要排下一帧
+}
+requestAnimationFrame(tick);
+
+// Chrome/Edge 在窗口被完全遮挡或标签页隐藏时会暂停 requestAnimationFrame，
+// 那样 Blender 里动一下画面就不动了。这里用定时器兜底，保证后台也在出帧。
+setInterval(() => {
+  if (document.hidden) step();
+}, 100);
+
+document.addEventListener('visibilitychange', () => {
+  hud.vis.textContent = document.hidden ? 'tab: hidden' : 'tab: visible';
+  hud.vis.className = document.hidden ? 'bad' : '';
+  if (!document.hidden) step();
+});
+
+window.addEventListener('beforeunload', () => { try { ws && ws.close(); } catch (e) {} });
+</script>
+</body>
+</html>

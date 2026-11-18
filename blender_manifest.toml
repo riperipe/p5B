@@ -1,0 +1,19 @@
+schema_version = "1.0.0"
+
+id = "p5inBlender"
+name = "p5inBlender"
+tagline = "Live 2D canvas (p5.js / three.js) as a UV-mapped texture"
+maintainer = "DeepseekWorkzone"
+type = "add-on"
+
+version = "0.3.0"
+
+blender_version_min = "4.2.0"
+
+license = ["SPDX:GPL-3.0-or-later"]
+
+[permissions]
+network = "Loopback socket listener on 127.0.0.1 (canvas frames)"
+
+[urls]
+documentation = "https://example.invalid/p5bridge"
