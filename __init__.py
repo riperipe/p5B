@@ -29,7 +29,7 @@ from . import live_image, transport, window
 bl_info = {
     "name": "p5inBlender",
     "author": "DeepseekWorkzone",
-    "version": (0, 20, 7),
+    "version": (0, 20, 8),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > p5inBlender",
     "description": "Live 2D canvas as a UV-mapped texture, coded in Blender's text editor",
@@ -1523,17 +1523,6 @@ class P5B_MT_menu(bpy.types.Menu):
         layout.operator("p5b.show_canvas", text="Show Live Canvas", icon=_icon("IMAGE_DATA"))
 
 
-class P5B_PT_panel(bpy.types.Panel):
-    bl_label = "p5inBlender"
-    bl_idname = "P5B_PT_panel"
-    bl_space_type = "VIEW_3D"
-    bl_region_type = "UI"
-    bl_category = "p5inBlender"
-
-    def draw(self, context):
-        _draw_status_and_start(self.layout)
-
-
 class P5B_PT_canvas(bpy.types.Panel):
     bl_label = "Canvas"
     bl_idname = "P5B_PT_canvas"
@@ -1541,6 +1530,7 @@ class P5B_PT_canvas(bpy.types.Panel):
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
     bl_category = "p5inBlender"
+    bl_order = 10
 
     def draw(self, context):
         sc = context.scene
@@ -1590,11 +1580,14 @@ class P5B_PT_sketch(bpy.types.Panel):
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
     bl_category = "p5inBlender"
+    bl_order = 0
 
     def draw(self, context):
         st = stats_snapshot()
         rec = active_record()
         layout = self.layout
+        _draw_status_and_start(layout)
+        layout.separator()
         row = layout.row(align=True)
         row.scale_y = 1.2
         row.operator("p5b.run_sketch", text="Run", icon=_icon("PLAY"))
@@ -1621,6 +1614,7 @@ class P5B_PT_tracking(bpy.types.Panel):
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
     bl_category = "p5inBlender"
+    bl_order = 20
 
     def draw(self, context):
         st = stats_snapshot()
@@ -1648,7 +1642,7 @@ class P5B_PT_render(bpy.types.Panel):
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
     bl_category = "p5inBlender"
-    bl_options = {"DEFAULT_CLOSED"}
+    bl_order = 30
 
     def draw(self, context):
         st = stats_snapshot()
@@ -1663,9 +1657,11 @@ class P5B_PT_render(bpy.types.Panel):
 class P5B_PT_instances(bpy.types.Panel):
     bl_label = "Instances"
     bl_idname = "P5B_PT_instances"
+    bl_options = {"DEFAULT_CLOSED"}
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
     bl_category = "p5inBlender"
+    bl_order = 40
 
     def draw(self, context):
         sc = context.scene
@@ -1715,7 +1711,7 @@ classes = (
     P5B_OT_cook_still, P5B_OT_cook_render, P5B_OT_render_animation,
     P5B_OT_instance_new, P5B_OT_instance_activate, P5B_OT_instance_start,
     P5B_OT_instance_stop, P5B_OT_instance_remove,
-    P5B_PT_panel, P5B_PT_canvas, P5B_PT_sketch, P5B_PT_tracking, P5B_PT_render,
+    P5B_PT_canvas, P5B_PT_sketch, P5B_PT_tracking, P5B_PT_render,
     P5B_PT_instances, P5B_PT_text_sidebar, P5B_MT_menu,
 )
 
