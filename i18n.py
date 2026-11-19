@@ -29,6 +29,12 @@ EN = {
     "正在监听，没有画布": "listening, no canvas",
     "已停止": "stopped",
     "实时信息": "Show Live Info",
+    "启动": "Start",
+    "停止": "Stop",
+    "在 Blender 里编辑": "Edit in Blender",
+    "外部编辑器": "External Editor",
+    "重置为示例": "Reset Demo",
+
     # 提示 / 报错
     "没有实例": "No instance",
     "请先启动实例": "Start the instance first",
@@ -52,7 +58,7 @@ EN = {
         "Run whichever sketch you are editing in the Text Editor "
         "(avoids editing a file that is not the one being run)",
     # 外置编辑目录说明
-    "p5inBlender 外置编辑目录": "p5inBlender external editing folder",
+    "p5B 外置编辑目录": "p5B external editing folder",
     "这些 .js 文件就是 Blender Text datablock 的镜像：":
         "These .js files mirror the Blender Text datablocks:",
     "  - 在编辑器里改并保存 → 插件 0.3 秒内读回 Blender 并推给画布\n":

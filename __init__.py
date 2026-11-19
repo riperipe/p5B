@@ -1,4 +1,4 @@
-# p5inBlender — 把 2D 画布当作实时纹理喂进 Blender
+# p5B — 把 2D 画布当作实时纹理喂进 Blender
 #
 # 结构：
 #   transport.py   端口上同时提供 HTTP（宿主页面）+ WebSocket（像素上行 / 状态下行）
@@ -30,11 +30,11 @@ from . import live_image, transport, window
 _t = _i18n.t
 
 bl_info = {
-    "name": "p5inBlender",
+    "name": "p5B",
     "author": "DeepseekWorkzone",
-    "version": (0, 21, 0),
+    "version": (0, 22, 0),
     "blender": (4, 2, 0),
-    "location": "View3D > Sidebar > p5inBlender",
+    "location": "View3D > Sidebar > p5B",
     "description": "Live 2D canvas as a UV-mapped texture, coded in Blender's text editor",
     "category": "Material",
 }
@@ -158,7 +158,7 @@ def host_status() -> dict:
             "pid": last["proc"].pid if last else None,
             "ports": [h["port"] for h in hosts]}
 
-TEMPLATE = r"""// p5b_sketch.js —— p5inBlender demo
+TEMPLATE = r"""// p5b_sketch.js —— p5B demo
 //
 // 这一份同时演示三件事：
 //   1. 被跟踪物体（Tracking → Track Selected）的屏幕坐标，画成带拖尾的光点
@@ -859,7 +859,8 @@ def cook_frame(frame: int | None = None, timeout: float = 5.0) -> int:
 class P5B_OT_start(bpy.types.Operator):
     bl_idname = "p5b.start"
     bl_label = "Start"
-    bl_description = "Start the receiver, push the sketch and run the canvas in the background"
+    bl_description = ("Start the receiver and the canvas, then run the sketch. "
+                      "If it is already running this simply re-runs the current sketch")
 
     def execute(self, context):
         sc = context.scene
@@ -870,7 +871,7 @@ class P5B_OT_start(bpy.types.Operator):
         push_sketch()
         if not host_status()["alive"]:
             launch_host("headless", port)
-        self.report({"INFO"}, f"p5inBlender running in background on 127.0.0.1:{port}")
+        self.report({"INFO"}, f"p5B running in background on 127.0.0.1:{port}")
         return {"FINISHED"}
 
 
@@ -947,7 +948,7 @@ def _write_authoring_bundle(folder: str) -> None:
         with open(settings, "w", encoding="utf-8", newline="\n") as fh:
             fh.write(
                 "{\n"
-                '  // p5inBlender: JS 编辑体验\n'
+                '  // p5B: JS 编辑体验\n'
                 '  "files.associations": { "*.js": "javascript" },\n'
                 '  "editor.tabSize": 2,\n'
                 '  "editor.quickSuggestions": { "other": true, "comments": false, "strings": false },\n'
@@ -972,7 +973,7 @@ def _write_authoring_bundle(folder: str) -> None:
     if not os.path.exists(readme):
         with open(readme, "w", encoding="utf-8", newline="\n") as fh:
             fh.write(
-                "p5inBlender 外置编辑目录\n"
+                "p5B 外置编辑目录\n"
                 "=========================\n\n"
                 "这些 .js 文件就是 Blender Text datablock 的镜像：\n"
                 "  - 在编辑器里改并保存 → 插件 0.3 秒内读回 Blender 并推给画布\n"
@@ -1002,7 +1003,7 @@ class P5B_OT_external_edit(bpy.types.Operator):
             path = bpy.path.abspath(text.filepath)
         else:
             base = bpy.path.abspath("//") if bpy.data.filepath else tempfile.gettempdir()
-            folder = os.path.join(base, "p5inblender_sketches")
+            folder = os.path.join(base, "p5b_sketches")
             os.makedirs(folder, exist_ok=True)
             name = rec.text if rec.text.lower().endswith((".js", ".py", ".txt")) else rec.text + ".js"
             path = os.path.join(folder, name)
@@ -1501,15 +1502,15 @@ def _draw_status_and_start(layout):
 
     row = layout.row(align=True)
     row.scale_y = 1.4
-    row.operator("p5b.start", text="Start", icon=_icon("PLAY"))
-    row.operator("p5b.stop", text="Stop", icon=_icon("SNAP_FACE"))
+    row.operator("p5b.start", text=_t("启动"), icon=_icon("PLAY"))
+    row.operator("p5b.stop", text=_t("停止"), icon=_icon("SNAP_FACE"))
 
 
 class P5B_MT_menu(bpy.types.Menu):
-    """Always-visible entry point: 3D View header → p5inBlender."""
+    """Always-visible entry point: 3D View header → p5B."""
 
     bl_idname = "P5B_MT_menu"
-    bl_label = "p5inBlender"
+    bl_label = "p5B"
 
     def draw(self, context):
         layout = self.layout
@@ -1532,7 +1533,7 @@ class P5B_PT_canvas(bpy.types.Panel):
     bl_options = {"DEFAULT_CLOSED"}
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
-    bl_category = "p5inBlender"
+    bl_category = "p5B"
     bl_order = 10
 
     def draw(self, context):
@@ -1584,7 +1585,7 @@ class P5B_PT_sketch(bpy.types.Panel):
     bl_options = {"DEFAULT_CLOSED"}
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
-    bl_category = "p5inBlender"
+    bl_category = "p5B"
     bl_order = 0
 
     def draw(self, context):
@@ -1593,10 +1594,6 @@ class P5B_PT_sketch(bpy.types.Panel):
         layout = self.layout
         _draw_status_and_start(layout)
         layout.separator()
-        row = layout.row(align=True)
-        row.scale_y = 1.2
-        row.operator("p5b.run_sketch", text="Run", icon=_icon("PLAY"))
-        row.operator("p5b.new_sketch", text="Edit", icon=_icon("TEXT"))
         if rec is not None:
             layout.prop_search(rec, "text", bpy.data, "texts", text="Sketch")
             if bpy.data.texts.get(rec.text) is None:
@@ -1606,8 +1603,9 @@ class P5B_PT_sketch(bpy.types.Panel):
                 layout.label(text=_t("编辑中：{name}（不在运行）", name=editing), icon=_icon("INFO"))
         layout.prop(context.scene, "p5b_follow_edit", text=_t("跟随编辑的文本"))
         row = layout.row(align=True)
-        row.operator("p5b.external_edit", text="Edit Externally", icon=_icon("TEXT"))
-        row.operator("p5b.reset_sketch", text="Reset Demo", icon=_icon("FILE_REFRESH"))
+        row.operator("p5b.new_sketch", text=_t("在 Blender 里编辑"), icon=_icon("TEXT"))
+        row.operator("p5b.external_edit", text=_t("外部编辑器"), icon=_icon("TEXT"))
+        layout.operator("p5b.reset_sketch", text=_t("重置为示例"), icon=_icon("FILE_REFRESH"))
         layout.prop(context.scene, "p5b_auto_run", text="Auto Run on Edit")
         layout.label(text=(f"v{st['sketch_version']} · {st['frames']} {_t('帧')} · "
                                    f"{_t('丢')} {st['dropped']} · {_t('旧连接帧 {n}', n=st['stale_frames'])}"))
@@ -1619,7 +1617,7 @@ class P5B_PT_tracking(bpy.types.Panel):
     bl_options = {"DEFAULT_CLOSED"}
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
-    bl_category = "p5inBlender"
+    bl_category = "p5B"
     bl_order = 20
 
     def draw(self, context):
@@ -1647,7 +1645,7 @@ class P5B_PT_render(bpy.types.Panel):
     bl_options = {"DEFAULT_CLOSED"}
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
-    bl_category = "p5inBlender"
+    bl_category = "p5B"
     bl_order = 30
 
     def draw(self, context):
@@ -1666,7 +1664,7 @@ class P5B_PT_instances(bpy.types.Panel):
     bl_options = {"DEFAULT_CLOSED"}
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
-    bl_category = "p5inBlender"
+    bl_category = "p5B"
     bl_order = 40
 
     def draw(self, context):
@@ -1693,11 +1691,11 @@ class P5B_PT_instances(bpy.types.Panel):
 class P5B_PT_text_sidebar(bpy.types.Panel):
     """Run button right next to the code."""
 
-    bl_label = "p5inBlender"
+    bl_label = "p5B"
     bl_idname = "P5B_PT_text_sidebar"
     bl_space_type = "TEXT_EDITOR"
     bl_region_type = "UI"
-    bl_category = "p5inBlender"
+    bl_category = "p5B"
 
     def draw(self, context):
         st = stats_snapshot()
@@ -1728,7 +1726,7 @@ def _on_load_post(*_args):
 
 
 def _draw_header_menu(self, context):
-    self.layout.menu("P5B_MT_menu", text="p5inBlender")
+    self.layout.menu("P5B_MT_menu", text="p5B")
 
 
 def _guard_panel_draws(classes):

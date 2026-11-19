@@ -41,7 +41,7 @@ def main() -> int:
             problems.append(f"版本不一致：bl_info={info_ver} manifest={man_ver}")
     zips = sorted(f for f in os.listdir(ROOT) if f.endswith(".zip"))
     if info_ver:
-        want = f"p5inBlender-{info_ver}.zip"
+        want = f"p5b-{info_ver}.zip"
         if zips and want not in zips:
             problems.append(f"zip 名字和版本对不上：有 {zips}，应为 {want}")
 

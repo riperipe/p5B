@@ -1,6 +1,8 @@
-# p5inBlender
+# p5B
 
 [English](README.md) · 中文
+
+> **非官方社区插件**：与 Processing Foundation（p5.js）和 Blender Foundation 均无隶属关系。
 
 把浏览器里的一张 2D 画布（p5.js / canvas 2D / three.js）当作 Blender 的实时纹理，
 UV 岛就是这扇"窗口"，着色器在它上面继续加工。
@@ -58,7 +60,7 @@ GLSL 里没有 JS。五个库只能跑在浏览器（Chromium 内核）里，进
 除了流式预览，现在还能"按帧要画面"：
 
 ```python
-p5inBlender.cook_frame(90)      # 让浏览器渲染第 90 帧 → 等回来 → 写进 P5B_live
+p5B.cook_frame(90)      # 让浏览器渲染第 90 帧 → 等回来 → 写进 P5B_live
 ```
 
 - 协议升到 v2：`magic "P5B2" | w | h | seq | req | nplanes | 0` + plane 表 + 负载
@@ -110,11 +112,11 @@ p5inBlender.cook_frame(90)      # 让浏览器渲染第 90 帧 → 等回来 →
 
 ## 安装 / 更新
 
-本包已安装到 Blender 的用户 addons 目录（`%APPDATA%\Blender Foundation\Blender\5.1\scripts\addons\p5inBlender`），
+本包已安装到 Blender 的用户 addons 目录（`%APPDATA%\Blender Foundation\Blender\5.1\scripts\addons\p5B`），
 并在偏好设置里启用，**重启 Blender 自动加载**（默认不启动，点 Start 才跑）。
 
 手工安装：`Edit > Preferences > Add-ons > Install from Disk`，选
-`p5inBlender-0.3.0.zip`（zip 根目录就是 `p5inBlender/`，可直接被 Blender 识别）。
+`p5B-0.3.0.zip`（zip 根目录就是 `p5B/`，可直接被 Blender 识别）。
 
 更新流程：
 
@@ -320,7 +322,7 @@ Python tokenizer（`text_format.c`），Python API 只暴露了一个 `show_synt
 插件给的是**随插件一起生成的外置编辑环境**（`Sketch` 面板 → `Edit Externally`）：
 
 ```
-p5inblender_sketches/
+p5b_sketches/
 ├── <你的sketch>.js
 ├── jsconfig.json            # JS 语义/补全配置
 ├── README.txt               # 用法说明
@@ -345,7 +347,7 @@ Blender 的 Text Editor **只内置 Python 的着色规则**（`SpaceTextEditor`
 
 **`Sketch` 面板 → `Edit Externally`**
 
-1. 把当前 sketch 存成磁盘文件（`//p5inblender_sketches/<名字>.js`；未保存的 .blend 落到临时目录）
+1. 把当前 sketch 存成磁盘文件（`//p5b_sketches/<名字>.js`；未保存的 .blend 落到临时目录）
 2. 用系统默认编辑器打开（装了 VS Code 就是 VS Code，带完整 JS 高亮）
 3. **保存文件即可**——插件每 0.3 秒看一次文件修改时间，变了就读回 Blender 并自动推给画布
 
@@ -357,9 +359,9 @@ sketch 就是 Blender 里的一个 **Text datablock**（不是磁盘文件），
 
 | 入口 | 说明 |
 |---|---|
-| N 面板 → `p5inBlender` → `Edit Sketch` | 自动打开 Text Editor 并载入当前实例的文本 |
+| N 面板 → `p5B` → `Edit Sketch` | 自动打开 Text Editor 并载入当前实例的文本 |
 | N 面板 → `Sketch` → `Edit` | 同上，面板里还会显示 `text: p5b_sketch_<实例>.js` |
-| 3D 视图顶栏菜单 → `p5inBlender` → `Edit Sketch` | 同上 |
+| 3D 视图顶栏菜单 → `p5B` → `Edit Sketch` | 同上 |
 | 任意区域切成 Text Editor | 左上角下拉选 `p5b_sketch_<实例>.js` |
 
 多实例时每个实例有自己的一份文本；`Sketch` 面板里的 `text:` 就是你正在编辑的那份。
@@ -431,10 +433,10 @@ if (tex) p.drawingContext.drawImage(tex, 0, 0, p.width, p.height);
 
 ### N 面板结构
 
-侧栏分类 `p5inBlender` 下**只有一层子层级**：平级面板，每个面板内部只放「一行按钮 / 一行标签」。
+侧栏分类 `p5B` 下**只有一层子层级**：平级面板，每个面板内部只放「一行按钮 / 一行标签」。
 
 ```
-p5inBlender   状态行 + Start / Stop                 ← 只管开关
+p5B   状态行 + Start / Stop                 ← 只管开关
 Canvas        Show / Window Plane
               Bind Mesh / Reset Material
               Standardize Canvas (2x2 on XY)
@@ -469,12 +471,12 @@ p5b.render_animation
 
 ```powershell
 # 1. Blender 里（或经 DSH bridge）加载插件
-python -c "import sys; sys.path.insert(0, r'D:\Deepseek\DeepseekWorkzone01'); import p5inBlender; p5inBlender.register()"
-p5inBlender.start_bridge(9877, 640, 360)
+python -c "import sys; sys.path.insert(0, r'D:\Deepseek\DeepseekWorkzone01'); import p5B; p5B.register()"
+p5B.start_bridge(9877, 640, 360)
 
 # 2. 起一个源
-& "D:\Anzhuang\Blender Foundation\Blender 5.1\5.1\python\bin\python.exe" p5inBlender\tools\sender.py --seconds 10
-& "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" p5inBlender\host\index.html
+& "D:\Anzhuang\Blender Foundation\Blender 5.1\5.1\python\bin\python.exe" p5B\tools\sender.py --seconds 10
+& "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" p5B\host\index.html
 ```
 
 ## 文件

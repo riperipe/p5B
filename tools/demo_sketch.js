@@ -1,4 +1,4 @@
-// p5b_sketch.js —— p5inBlender demo
+// p5b_sketch.js —— p5B demo
 //
 // 这一份同时演示三件事：
 //   1. 被跟踪物体（Tracking → Track Selected）的屏幕坐标，画成带拖尾的光点

@@ -1,4 +1,7 @@
-# p5 in Blender
+# p5B
+
+> **Unofficial community add-on.** Not affiliated with or endorsed by the
+> Processing Foundation (p5.js) or the Blender Foundation.
 
 Write **p5.js sketches inside Blender** and use the live canvas as a texture on any
 mesh, mapped through UVs. The 2D canvas is the window; UV islands decide where that
@@ -10,10 +13,10 @@ window opens on your model.
 
 ## Download and install
 
-1. **[Download the latest release](../../releases/latest)** → pick `p5inBlender-<version>.zip`
+1. **[Download the latest release](../../releases/latest)** → pick `p5B-<version>.zip`
    (do not unzip it).
 2. Blender 4.2+ → `Edit → Preferences → Get Extensions → Install from Disk…`.
-3. Enable **p5 in Blender**, then open the 3D View sidebar with `N` → `p5inBlender`.
+3. Enable **p5B**, then open the 3D View sidebar with `N` → `p5B`.
 
 ## 30-second quick start
 
@@ -111,7 +114,7 @@ overwritten automatically.
 ## Working in an external editor
 
 Blender's text editor only has Python syntax rules, so JavaScript stays plain.
-`Sketch → Edit Externally` saves the sketch to `//p5inblender_sketches/`, opens it in
+`Sketch → Edit Externally` saves the sketch to `//p5b_sketches/`, opens it in
 your OS editor (VS Code gives real JS highlighting + the `p5.vscode` API
 completion), and syncs your saves back into Blender within ~0.3 s.
 
@@ -137,7 +140,7 @@ completion), and syncs your saves back into Blender within ~0.3 s.
 ## Development
 
 ```
-p5inBlender/
+p5B/
 ├── __init__.py        add-on entry: operators, panels, pump, cook
 ├── transport.py       one port: HTTP host page + WebSocket frames + raw TCP v1
 ├── live_image.py      Image datablock writes (sRGB byte passthrough)

@@ -1,4 +1,4 @@
-# p5inBlender — 路线图
+# p5B — 路线图
 
 把 2D 创意编程（p5.js）变成 Blender 里的一等公民：在 Blender 里写代码、点运行、
 在 Image Editor 和任何 UV 映射的模型上看到它，并且能逐帧确定性出片。

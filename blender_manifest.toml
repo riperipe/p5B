@@ -1,12 +1,12 @@
 schema_version = "1.0.0"
 
-id = "p5inBlender"
-name = "p5 in Blender"
-tagline = "Code p5.js inside Blender; the live canvas becomes a UV texture"
+id = "p5b"
+name = "p5B"
+tagline = "Unofficial add-on: code p5.js in Blender, canvas as a UV texture"
 maintainer = "DeepseekWorkzone"
 type = "add-on"
 
-version = "0.21.0"
+version = "0.22.0"
 
 blender_version_min = "4.2.0"
 
@@ -14,3 +14,8 @@ license = ["SPDX:GPL-3.0-or-later"]
 
 [permissions]
 network = "Loopback socket on 127.0.0.1 to stream canvas frames"
+
+[urls]
+documentation = "https://github.com/DeepseekWorkzone/p5B#readme"
+website = "https://github.com/DeepseekWorkzone/p5B"
+tracker = "https://github.com/DeepseekWorkzone/p5B/issues"
