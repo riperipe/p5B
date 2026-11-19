@@ -29,7 +29,7 @@ from . import live_image, transport, window
 bl_info = {
     "name": "p5inBlender",
     "author": "DeepseekWorkzone",
-    "version": (0, 17, 0),
+    "version": (0, 18, 0),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > p5inBlender",
     "description": "Live 2D canvas as a UV-mapped texture, coded in Blender's text editor",
@@ -294,13 +294,11 @@ def _tag_redraw():
                     area.tag_redraw()
 
 
-def canvas_frame(plane):
+def canvas_frame(plane, img_size=None):
     """画布坐标系：以画布平面自身为准（和相机无关）。
 
-    画布是 XY 平面上的 2x2 方片（同 Add > Mesh > Plane）。被跟踪物体、几何体
-    都投影到画布自己的局部坐标：
-        u = 局部x / 宽 + 0.5      v = 0.5 - 局部y / 高
-    u/v 落在 [0,1] 就是"在画布上"，否则在画布外。
+    画布是 XY 平面上的 2x2 方片（同 Add > Mesh > Plane）。图像按原比例居中放进
+    这块方片（letterbox，不拉伸），所以物体坐标 = 图像内的归一化坐标。
     """
     if plane is None:
         return None
@@ -313,7 +311,9 @@ def canvas_frame(plane):
     sy = (max(ys) - min(ys)) or 2.0
     cx = (max(xs) + min(xs)) * 0.5
     cy = (max(ys) + min(ys)) * 0.5
-    return {"inv": inv, "sx": sx, "sy": sy, "cx": cx, "cy": cy, "name": plane.name}
+    fx, fy = window.fit_rect(*(img_size or (0, 0)))
+    return {"inv": inv, "sx": sx, "sy": sy, "cx": cx, "cy": cy,
+            "fx": fx, "fy": fy, "name": plane.name}
 
 
 def project_to_canvas(point, frame):
@@ -323,6 +323,9 @@ def project_to_canvas(point, frame):
     local = frame["inv"] @ Vector(point)
     u = (local.x - frame["cx"]) / frame["sx"] + 0.5
     v = 0.5 - (local.y - frame["cy"]) / frame["sy"]
+    # 方片坐标 → 图像坐标（图像只占方片中间一条）
+    u = (u - 0.5) / frame["fx"] + 0.5
+    v = (v - 0.5) / frame["fy"] + 0.5
     return u, v, local.z
 
 
@@ -332,9 +335,16 @@ def canvas_plane_of(rec):
     return bpy.data.objects.get(rec.plane)
 
 
-def build_state(scene, plane=None) -> dict:
+def live_size_of(rec):
+    rt = _runtime(rec.name) if rec is not None else None
+    if rt is None or rt["live"] is None:
+        return None
+    return (int(rt["live"].width) or 1, int(rt["live"].height) or 1)
+
+
+def build_state(scene, plane=None, img_size=None) -> dict:
     """What the sketch gets to see: tracked objects in canvas space."""
-    frame = canvas_frame(plane)
+    frame = canvas_frame(plane, img_size)
     objects = []
     if frame is not None:
         for ob in scene.objects:
@@ -385,7 +395,7 @@ def _runtime(name: str):
 def _new_runtime(name: str) -> dict:
     return {"name": name, "server": None, "live": None, "frames": 0, "fps": 0.0,
             "t0": 0.0, "n": 0, "last_seq": -1, "last_size": (0, 0),
-            "sketch_version": 0, "error": ""}
+            "sketch_version": 0, "error": "", "aspect_size": None, "geo": []}
 
 
 def _ensure_pump():
@@ -466,13 +476,13 @@ def instance_push(rec) -> int:
     return rt["sketch_version"]
 
 
-def build_geometry(scene, plane=None) -> list:
+def build_geometry(scene, plane=None, img_size=None) -> list:
     """Meshes marked with p5b_geo, projected onto the canvas plane.
 
     Canvas-space like everything else: the canvas is the frame, the camera is
     irrelevant. A mesh above the canvas reads like a shadow/projection on it.
     """
-    frame = canvas_frame(plane)
+    frame = canvas_frame(plane, img_size)
     if frame is None:
         return []
     out = []
@@ -597,9 +607,16 @@ def _pump():
                 continue
             rec = instance_record(rt["name"])
             plane = canvas_plane_of(rec)
-            state = build_state(scene, plane)
+            img_size = live_size_of(rec) if rec is not None else None
+            # 图像尺寸变了（sketch 自己 resizeCanvas）：重算 letterbox
+            if rec is not None and img_size and rt.get("aspect_size") != img_size:
+                rt["aspect_size"] = img_size
+                mat = bpy.data.materials.get(rec.material or "")
+                if mat is not None and rt["live"] is not None:
+                    window.apply_aspect(mat, rt["live"].image)
+            state = build_state(scene, plane, img_size)
             if rebuild_geo:
-                rt["geo"] = build_geometry(scene, plane)
+                rt["geo"] = build_geometry(scene, plane, img_size)
             state["geo"] = rt.get("geo", [])
             if rec is not None and rec.name == _state.get("active"):
                 st["state"] = state
@@ -741,8 +758,8 @@ def cook_frame(frame: int | None = None, timeout: float = 5.0) -> int:
     scene.frame_set(target)
     w = int((rec.width if rec else 0) or scene.p5b_width)
     h = int((rec.height if rec else 0) or scene.p5b_height)
-    state = build_state(scene, canvas_plane_of(rec))
-    state["geo"] = build_geometry(scene, canvas_plane_of(rec))
+    state = build_state(scene, canvas_plane_of(rec), live_size_of(rec))
+    state["geo"] = build_geometry(scene, canvas_plane_of(rec), live_size_of(rec))
     state["w"] = w
     state["h"] = h
     fps = max(scene.render.fps, 1)

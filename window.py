@@ -57,6 +57,35 @@ def _apply_blend_mode(mat) -> None:
                 continue
 
 
+def fit_rect(img_w, img_h):
+    """How much of the square canvas the image covers, uniformly scaled (contain fit).
+
+    640x360 on a 2x2 square -> (1.0, 0.5625): full width, vertical letterbox.
+    """
+    if not img_w or not img_h:
+        return 1.0, 1.0
+    aspect = float(img_w) / float(img_h)
+    if aspect >= 1.0:
+        return 1.0, 1.0 / aspect
+    return aspect, 1.0
+
+
+def apply_aspect(mat, image=None) -> None:
+    """Uniform-scale the image inside the square canvas: no stretching, bars instead."""
+    nt = mat.node_tree
+    tex = next((n for n in nt.nodes if n.type == "TEX_IMAGE"), None)
+    img = image if image is not None else (tex.image if tex else None)
+    if img is None:
+        return
+    sx, sy = fit_rect(img.size[0], img.size[1])
+    mapping = nt.nodes.get("P5B Mapping") or next((n for n in nt.nodes if n.type == "MAPPING"), None)
+    if mapping is not None:
+        mapping.inputs["Scale"].default_value = (1.0 / sx, 1.0 / sy, 1.0)
+        mapping.inputs["Location"].default_value = (0.5 - 0.5 / sx, 0.5 - 0.5 / sy, 0.0)
+    if tex is not None:
+        tex.extension = "CLIP"  # 画布外不重复，露底色/透明
+
+
 def build_material(image, name: str = MAT_NAME, force: bool = False) -> bpy.types.Material:
     mat = bpy.data.materials.get(name)
     if mat is None:
@@ -70,6 +99,7 @@ def build_material(image, name: str = MAT_NAME, force: bool = False) -> bpy.type
         if tex is not None:
             tex.image = image
         _apply_blend_mode(mat)
+        apply_aspect(mat, image)
         return mat
 
     nt.nodes.clear()
@@ -140,6 +170,7 @@ def build_material(image, name: str = MAT_NAME, force: bool = False) -> bpy.type
     tex.image = image
     _apply_blend_mode(mat)
     mat.use_backface_culling = False
+    apply_aspect(mat, image)
     return mat
 
 
