@@ -29,7 +29,7 @@ from . import live_image, transport, window
 bl_info = {
     "name": "p5inBlender",
     "author": "DeepseekWorkzone",
-    "version": (0, 16, 0),
+    "version": (0, 16, 1),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > p5inBlender",
     "description": "Live 2D canvas as a UV-mapped texture, coded in Blender's text editor",
@@ -668,6 +668,7 @@ def stats_snapshot():
         "host": host_status(),
         "sketch_version": (rt["sketch_version"] if rt else 0),
         "tracked": len((st["state"] or {}).get("objects", [])),
+        "visible": sum(1 for o in (st["state"] or {}).get("objects", []) if o.get("visible", True)),
         "client_p5": (srv.stats.get("client_p5") if srv else None),
         "textures": (srv.stats.get("textures", 0) if srv else 0),
         "tex_acks": (srv.stats.get("tex_acks", 0) if srv else 0),
@@ -1441,6 +1442,13 @@ class P5B_PT_tracking(bpy.types.Panel):
         row = layout.row(align=True)
         row.operator("p5b.mark_geo", text="Send Geometry", icon="MESH_DATA")
         row.operator("p5b.unmark_geo", text="", icon="X")
+        objs = (st.get("state") or {}).get("objects") or []
+        if st["tracked"]:
+            layout.label(text=f"tracked {st['tracked']} · on screen {st['visible']}")
+            if st["visible"] == 0:
+                layout.label(text="tracked objects are off-screen (check the camera)", icon="ERROR")
+        else:
+            layout.label(text="no tracked object")
         layout.label(text=f"{st['tracked']} object(s) sent to the sketch")
 
 

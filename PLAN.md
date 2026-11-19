@@ -91,6 +91,12 @@
 - 修法：全部改成走 `active_record()` + `_runtime()`；同时让 `Run` 在没有画布客户端时
   自动拉起后台 host（点 Run 就该看到东西）。
 
+**M5.9 追踪诊断：物体在画面外看不出来** ✅
+- 症状：ConnectedParticles 这类 sketch 显示"tracked · idle"，一个粒子都没有。
+- 原因：相机被挪走后被跟踪物体投影到屏幕外（`visible: false`），sketch 按"鼠标离开画布"
+  处理；另外窗户平面被误跟踪，污染了 objects 列表。
+- 修法：`Tracking` 面板显示 `tracked N · on screen M`，全在画面外时红字提示。
+
 **M6 — 平台与分发**（macOS 暂缓，用户明确说不急）
 - macOS 适配（自备 Chromium，不用 WKWebView）
 - 打包：blender_manifest + 可选 Spout/Syphon 加速通道
