@@ -16,6 +16,6 @@ license = ["SPDX:GPL-3.0-or-later"]
 network = "Loopback socket on 127.0.0.1 to stream canvas frames"
 
 [urls]
-documentation = "https://github.com/DeepseekWorkzone/p5B#readme"
-website = "https://github.com/DeepseekWorkzone/p5B"
-tracker = "https://github.com/DeepseekWorkzone/p5B/issues"
+documentation = "https://github.com/riperipe/p5B#readme"
+website = "https://github.com/riperipe/p5B"
+tracker = "https://github.com/riperipe/p5B/issues"
