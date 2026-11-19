@@ -437,8 +437,8 @@ Canvas        Show / Window Plane
               Bind Mesh / Reset Material
               Standardize Canvas (2x2 on XY)
               Show Live Info（实时信息开关）
+              Texture 下拉（上游纹理 / 自反馈）
               Open / Background / Close（浏览器）
-              Texture 下拉 + Feedback
               端口 W H
 Sketch        Run / Edit
               Sketch 下拉（选 Text datablock）

@@ -29,7 +29,7 @@ from . import live_image, transport, window
 bl_info = {
     "name": "p5inBlender",
     "author": "DeepseekWorkzone",
-    "version": (0, 20, 1),
+    "version": (0, 20, 2),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > p5inBlender",
     "description": "Live 2D canvas as a UV-mapped texture, coded in Blender's text editor",
@@ -300,14 +300,27 @@ def _icon(name: str) -> str:
     return name if (not _ICON_CACHE or name in _ICON_CACHE) else "NONE"
 
 
-def _tag_redraw():
+_LAST_TAG = 0.0
+
+
+def _tag_redraw(force: bool = False, hz: float = 16.0):
+    """刷新发生变化的区域。
+
+    每秒跟着帧率 tag 整个界面（以前是 60~100 次/秒，还把 TEXT_EDITOR/PROPERTIES 一起
+    标脏）会让侧栏和视口看起来一直在闪。这里限到 16 Hz，而且只标真正显示图像的区域。
+    """
+    global _LAST_TAG
+    now = time.perf_counter()
+    if not force and now - _LAST_TAG < (1.0 / max(hz, 1.0)):
+        return
+    _LAST_TAG = now
     for wm in bpy.data.window_managers:
         for win in wm.windows:
             screen = win.screen
             if screen is None:
                 continue
             for area in screen.areas:
-                if area.type in {"IMAGE_EDITOR", "VIEW_3D", "TEXT_EDITOR", "PROPERTIES"}:
+                if area.type in {"IMAGE_EDITOR", "VIEW_3D"}:
                     area.tag_redraw()
 
 
@@ -607,7 +620,9 @@ def _pump():
                 rt["t0"] = now
             dt = now - rt["t0"]
             if dt >= 0.5:
-                rt["fps"] = rt["n"] / dt
+                measured = rt["n"] / dt
+                # 平滑一下，面板上那个 fps 不要每半秒跳一次
+                rt["fps"] = measured if rt["fps"] <= 0 else rt["fps"] * 0.6 + measured * 0.4
                 rt["n"] = 0
                 rt["t0"] = now
             pushed_total += pushed
@@ -1098,21 +1113,6 @@ class P5B_OT_reset_material(bpy.types.Operator):
         return {"FINISHED"}
 
 
-class P5B_OT_feedback(bpy.types.Operator):
-    bl_idname = "p5b.feedback"
-    bl_label = "Use Own Canvas"
-    bl_description = "Feed the active instance's canvas back to its own sketch (feedback painting)"
-
-    def execute(self, context):
-        rec = active_record()
-        if rec is None:
-            self.report({"ERROR"}, "no instance")
-            return {"CANCELLED"}
-        rec.texture = rec.image
-        self.report({"INFO"}, f"{rec.texture} -> {rec.name}")
-        return {"FINISHED"}
-
-
 class P5B_OT_bind_plane(bpy.types.Operator):
     bl_idname = "p5b.bind_plane"
     bl_label = "Bind Selected to Instance"
@@ -1491,8 +1491,6 @@ class P5B_PT_canvas(bpy.types.Panel):
         rec = active_record()
         if rec is not None:
             layout.prop_search(rec, "texture", bpy.data, "images", text="Texture")
-            row = layout.row(align=True)
-            row.operator("p5b.feedback", text="Feedback", icon=_icon("LOOP_BACK"))
 
         row = layout.row(align=True)
         op = row.operator("p5b.open_host", text="Open", icon=_icon("WINDOW"))
@@ -1632,7 +1630,7 @@ classes = (
     P5B_OT_external_edit,
     P5B_OT_open_host, P5B_OT_close_host,
     P5B_OT_create_window, P5B_OT_show_canvas, P5B_OT_track, P5B_OT_untrack,
-    P5B_OT_bind_plane, P5B_OT_feedback, P5B_OT_mark_geo, P5B_OT_unmark_geo, P5B_OT_reset_material,
+    P5B_OT_bind_plane, P5B_OT_mark_geo, P5B_OT_unmark_geo, P5B_OT_reset_material,
     P5B_OT_standardize_plane,
     P5B_OT_cook_still, P5B_OT_cook_render, P5B_OT_render_animation,
     P5B_OT_instance_new, P5B_OT_instance_activate, P5B_OT_instance_start,
