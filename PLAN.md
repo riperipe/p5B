@@ -79,6 +79,12 @@
 - [x] `Sketch` 面板可下拉切换实例用哪份 Text datablock
 - [x] 实测：800×800 WEBGL glitch shader sketch 正常出图（41.9 fps）
 
+**M5.7 修：切换 sketch 后画面不更新** ✅
+- 症状：换一份代码跑，Blender 里画面完全不变，看起来像"跑不动"。
+- 原因：重载时 `destroySketch()` 没清掉 `iframeCanvas`，旧 iframe 的最后一帧
+  继续被当成当前画面发回 Blender；新 sketch 其实已经在跑（只是没被看到）。
+- 修法：`destroySketch()` 里 `iframeCanvas = null`。
+
 **M6 — 平台与分发**（macOS 暂缓，用户明确说不急）
 - macOS 适配（自备 Chromium，不用 WKWebView）
 - 打包：blender_manifest + 可选 Spout/Syphon 加速通道

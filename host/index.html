@@ -241,6 +241,7 @@ function destroySketch() {
     try { iframe.remove(); } catch (e) { /* ignore */ }
     iframe = null;
   }
+  iframeCanvas = null;      // 别让旧 iframe 的帧继续被当成当前画面
   mount.innerHTML = '';
   placeholder = null;
 }
