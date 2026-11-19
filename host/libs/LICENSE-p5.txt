@@ -1,0 +1,6 @@
+p5.js is bundled in host/libs/ (p5.min.js = p5 1.11.3, p5-2.min.js = p5 2.4.0).
+p5.js is (c) the p5.js contributors and GNU Foundation, released under the MIT licence:
+https://github.com/processing/p5.js/blob/main/LICENSE
+
+p5.js-compatibility (LGPL-2.1) is NOT bundled: when a sketch asks for p5 2.x the host
+loads it from a CDN at runtime. https://github.com/processing/p5.js-compatibility

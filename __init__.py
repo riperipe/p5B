@@ -24,12 +24,15 @@ import numpy as np
 from mathutils import Vector
 from bpy_extras.object_utils import world_to_camera_view
 
+from . import i18n as _i18n
 from . import live_image, transport, window
+
+_t = _i18n.t
 
 bl_info = {
     "name": "p5inBlender",
     "author": "DeepseekWorkzone",
-    "version": (0, 20, 8),
+    "version": (0, 21, 0),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > p5inBlender",
     "description": "Live 2D canvas as a UV-mapped texture, coded in Blender's text editor",
@@ -1136,7 +1139,7 @@ class P5B_OT_reset_material(bpy.types.Operator):
         rec = active_record()
         rt = _runtime(rec.name) if rec is not None else None
         if rt is None or rt["live"] is None:
-            self.report({"ERROR"}, "start the instance first")
+            self.report({"ERROR"}, _t("请先启动实例"))
             return {"CANCELLED"}
         name = (rec.material or f"P5B_Canvas_{rec.name}")
         # 就地重建节点（不删数据块，避免把正在用它的物体留空槽）
@@ -1154,7 +1157,7 @@ class P5B_OT_reset_material(bpy.types.Operator):
 class P5B_OT_feedback(bpy.types.Operator):
     bl_idname = "p5b.feedback"
     bl_label = "自身画布作纹理"
-    bl_description = (
+    bl_description = _t(
         "把当前实例的画布图像设为它的上游纹理，sketch 每 0.1 秒能读到上一帧"
         "（视频反馈：拖影、万花筒、自相似）\n"
         "不是撤销/返回。\n"
@@ -1170,14 +1173,14 @@ class P5B_OT_feedback(bpy.types.Operator):
     def execute(self, context):
         rec = active_record()
         if rec is None:
-            self.report({"ERROR"}, "没有实例")
+            self.report({"ERROR"}, _t("没有实例"))
             return {"CANCELLED"}
         img = bpy.data.images.get(rec.image)
         if img is None:
-            self.report({"ERROR"}, f"实例 {rec.name} 的画布图像不存在（{rec.image or '空'}）")
+            self.report({"ERROR"}, _t("实例 {name} 的画布图像不存在（{image}）", name=rec.name, image=rec.image or "-"))
             return {"CANCELLED"}
         rec.texture = img.name
-        self.report({"INFO"}, f"{rec.name} 的纹理 ← {img.name}")
+        self.report({"INFO"}, _t("实例 {name} 的纹理 ← {image}", name=rec.name, image=img.name))
         return {"FINISHED"}
 
 
@@ -1190,7 +1193,7 @@ class P5B_OT_bind_plane(bpy.types.Operator):
         rec = active_record()
         rt = _runtime(rec.name) if rec is not None else None
         if rt is None or rt["live"] is None:
-            self.report({"ERROR"}, "start the instance first")
+            self.report({"ERROR"}, _t("请先启动实例"))
             return {"CANCELLED"}
         targets = [o for o in context.selected_objects if o.type == "MESH"]
         if not targets:
@@ -1483,13 +1486,13 @@ class P5B_OT_instance_remove(bpy.types.Operator):
 def _draw_status_and_start(layout):
     st = stats_snapshot()
     if st["connected"] and st["fps"] > 0.5:
-        text, icon = f"live — {st['fps']} fps", "CHECKMARK"
+        text, icon = _t("正在运行 — {fps} fps", fps=st["fps"]), "CHECKMARK"
     elif st["connected"]:
-        text, icon = "connected, waiting for frames", "TIME"
+        text, icon = _t("已连接，等待画面"), "TIME"
     elif st["running"]:
-        text, icon = "listening, no canvas", "SHADING_WIRE"
+        text, icon = _t("正在监听，没有画布"), "SHADING_WIRE"
     else:
-        text, icon = "stopped", "PAUSE"
+        text, icon = _t("已停止"), "PAUSE"
 
     col = layout.column(align=True)
     col.label(text=text, icon=icon)
@@ -1545,18 +1548,20 @@ class P5B_PT_canvas(bpy.types.Panel):
         row.operator("p5b.bind_plane", text="Bind Mesh", icon=_icon("LINKED"))
         row.operator("p5b.reset_material", text="Reset Material", icon=_icon("FILE_REFRESH"))
         layout.operator("p5b.standardize_plane", text="Standardize Canvas (2x2 on XY)", icon=_icon("MESH_GRID"))
-        layout.prop(context.scene, "p5b_show_hud", text="Show Live Info")
+        layout.prop(context.scene, "p5b_show_hud", text=_t("实时信息"))
         rec = active_record()
         if rec is not None:
-            layout.prop_search(rec, "texture", bpy.data, "images", text="纹理")
+            layout.prop_search(rec, "texture", bpy.data, "images", text=_t("纹理"))
             row = layout.row(align=True)
-            row.operator("p5b.feedback", text="自身画布作纹理", icon=_icon("LOOP_BACK"))
+            row.operator("p5b.feedback", text=_t("自身画布作纹理"), icon=_icon("LOOP_BACK"))
             target = bpy.data.images.get(rec.image)
-            layout.label(
-                text=(f"目标纹理：{target.name}" if target is not None
-                      else f"目标纹理：{rec.image or '（无）'}（未启动）"),
-                icon=_icon("IMAGE_DATA") if target is not None else _icon("ERROR"),
-            )
+            if target is not None:
+                layout.label(text=_t("目标纹理：{name}", name=target.name), icon=_icon("IMAGE_DATA"))
+            else:
+                layout.label(
+                    text=_t("目标纹理：{name}（未启动）", name=rec.image or _t("（无）")),
+                    icon=_icon("ERROR"),
+                )
 
         row = layout.row(align=True)
         op = row.operator("p5b.open_host", text="Open", icon=_icon("WINDOW"))
@@ -1595,16 +1600,17 @@ class P5B_PT_sketch(bpy.types.Panel):
         if rec is not None:
             layout.prop_search(rec, "text", bpy.data, "texts", text="Sketch")
             if bpy.data.texts.get(rec.text) is None:
-                layout.label(text=f"missing text: {rec.text}", icon=_icon("ERROR"))
+                layout.label(text=_t("缺失文本：{name}", name=rec.text), icon=_icon("ERROR"))
             editing = _open_text_name()
             if editing and editing != rec.text:
-                layout.label(text=f"编辑中：{editing}（不在运行）", icon=_icon("INFO"))
-        layout.prop(context.scene, "p5b_follow_edit", text="跟随编辑的文本")
+                layout.label(text=_t("编辑中：{name}（不在运行）", name=editing), icon=_icon("INFO"))
+        layout.prop(context.scene, "p5b_follow_edit", text=_t("跟随编辑的文本"))
         row = layout.row(align=True)
         row.operator("p5b.external_edit", text="Edit Externally", icon=_icon("TEXT"))
         row.operator("p5b.reset_sketch", text="Reset Demo", icon=_icon("FILE_REFRESH"))
         layout.prop(context.scene, "p5b_auto_run", text="Auto Run on Edit")
-        layout.label(text=f"v{st['sketch_version']} · {st['frames']} 帧 · 丢 {st['dropped']} · 旧连接帧 {st['stale_frames']}")
+        layout.label(text=(f"v{st['sketch_version']} · {st['frames']} {_t('帧')} · "
+                                   f"{_t('丢')} {st['dropped']} · {_t('旧连接帧 {n}', n=st['stale_frames'])}"))
 
 
 class P5B_PT_tracking(bpy.types.Panel):
@@ -1733,7 +1739,7 @@ def _guard_panel_draws(classes):
                 return fn(self, context)
             except Exception as exc:  # noqa: BLE001
                 try:
-                    self.layout.label(text=("panel error: " + str(exc))[:90], icon=_icon("ERROR"))
+                    self.layout.label(text=_t("面板错误：{msg}", msg=str(exc))[:120], icon=_icon("ERROR"))
                 except Exception:
                     pass
                 return None
@@ -1773,7 +1779,7 @@ def register():
     if not hasattr(bpy.types.Scene, "p5b_follow_edit"):
         bpy.types.Scene.p5b_follow_edit = bpy.props.BoolProperty(
             name="Follow Edited Text", default=True,
-            description="在文本编辑器里改哪份 sketch，就自动让实例跑哪份（避免改了别的文件没反应）")
+            description=_t("在文本编辑器里改哪份 sketch，就自动让实例跑哪份（避免改了别的文件没反应）"))
     if not hasattr(bpy.types.Scene, "p5b_show_hud"):
         bpy.types.Scene.p5b_show_hud = bpy.props.BoolProperty(
             name="Show Live Info", default=True,
