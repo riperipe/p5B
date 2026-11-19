@@ -29,7 +29,7 @@ from . import live_image, transport, window
 bl_info = {
     "name": "p5inBlender",
     "author": "DeepseekWorkzone",
-    "version": (0, 16, 1),
+    "version": (0, 17, 0),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > p5inBlender",
     "description": "Live 2D canvas as a UV-mapped texture, coded in Blender's text editor",
@@ -294,27 +294,67 @@ def _tag_redraw():
                     area.tag_redraw()
 
 
-def build_state(scene) -> dict:
-    """What the sketch gets to see: tracked objects projected to screen space."""
-    cam = scene.camera
+def canvas_frame(plane):
+    """画布坐标系：以画布平面自身为准（和相机无关）。
+
+    画布是 XY 平面上的 2x2 方片（同 Add > Mesh > Plane）。被跟踪物体、几何体
+    都投影到画布自己的局部坐标：
+        u = 局部x / 宽 + 0.5      v = 0.5 - 局部y / 高
+    u/v 落在 [0,1] 就是"在画布上"，否则在画布外。
+    """
+    if plane is None:
+        return None
+    mw = plane.matrix_world
+    inv = mw.inverted()
+    corners = [Vector(c) for c in plane.bound_box]
+    xs = [c.x for c in corners]
+    ys = [c.y for c in corners]
+    sx = (max(xs) - min(xs)) or 2.0
+    sy = (max(ys) - min(ys)) or 2.0
+    cx = (max(xs) + min(xs)) * 0.5
+    cy = (max(ys) + min(ys)) * 0.5
+    return {"inv": inv, "sx": sx, "sy": sy, "cx": cx, "cy": cy, "name": plane.name}
+
+
+def project_to_canvas(point, frame):
+    """世界坐标 → 画布 uv（u 向右、v 向下，和图像坐标一致）+ 离画布高度。"""
+    if frame is None:
+        return 0.0, 0.0, 0.0
+    local = frame["inv"] @ Vector(point)
+    u = (local.x - frame["cx"]) / frame["sx"] + 0.5
+    v = 0.5 - (local.y - frame["cy"]) / frame["sy"]
+    return u, v, local.z
+
+
+def canvas_plane_of(rec):
+    if rec is None or not rec.plane:
+        return None
+    return bpy.data.objects.get(rec.plane)
+
+
+def build_state(scene, plane=None) -> dict:
+    """What the sketch gets to see: tracked objects in canvas space."""
+    frame = canvas_frame(plane)
     objects = []
-    if cam is not None:
+    if frame is not None:
         for ob in scene.objects:
             if not ob.get("p5b_track"):
                 continue
             co = ob.matrix_world.translation
-            v = world_to_camera_view(scene, cam, Vector(co))
+            u, v, height = project_to_canvas(co, frame)
             objects.append({
                 "name": ob.name,
-                "x": round(float(v.x), 5),
-                "y": round(1.0 - float(v.y), 5),  # canvas y grows downward
-                "depth": round(float(v.z), 4),
-                "visible": bool(v.z > 0.0 and -0.25 <= v.x <= 1.25 and -0.25 <= v.y <= 1.25),
+                "x": round(float(u), 5),
+                "y": round(float(v), 5),
+                "depth": round(float(height), 4),  # 高出画布多少（画布法线方向）
+                "visible": bool(0.0 <= u <= 1.0 and 0.0 <= v <= 1.0),
             })
     return {
         "type": "state",
         "frame": scene.frame_current,
         "t": round(scene.frame_current / max(scene.render.fps, 1), 4),
+        "canvas": ({"name": frame["name"], "w": round(frame["sx"], 4), "h": round(frame["sy"], 4)}
+                   if frame else None),
         "objects": objects,
     }
 
@@ -370,8 +410,9 @@ def create_instance(name: str, port: int | None = None, with_plane: bool = True)
     if not text.as_string().strip():
         text.from_string(TEMPLATE)
     if with_plane:
-        plane = window.create_window_plane(name=f"P5B_Window_{name}", size=1.4,
-                                           location=(0.0, 0.0, 0.0))
+        idx = max(len(sc.p5b_instances) - 1, 0)
+        plane = window.create_window_plane(name=f"P5B_Window_{name}", size=2.0,
+                                           location=(2.5 * idx, 0.0, 0.0))
         rec.plane = plane.name
     return rec
 
@@ -425,14 +466,14 @@ def instance_push(rec) -> int:
     return rt["sketch_version"]
 
 
-def build_geometry(scene) -> list:
-    """Meshes marked with p5b_geo, projected to 2D screen space.
+def build_geometry(scene, plane=None) -> list:
+    """Meshes marked with p5b_geo, projected onto the canvas plane.
 
-    The sketch gets wireframe data without doing any 3D math: Blender does the
-    projection, the canvas just draws lines.
+    Canvas-space like everything else: the canvas is the frame, the camera is
+    irrelevant. A mesh above the canvas reads like a shadow/projection on it.
     """
-    cam = scene.camera
-    if cam is None:
+    frame = canvas_frame(plane)
+    if frame is None:
         return []
     out = []
     for ob in scene.objects:
@@ -442,8 +483,8 @@ def build_geometry(scene) -> list:
         mw = ob.matrix_world
         verts = []
         for v in me.vertices:
-            p = world_to_camera_view(scene, cam, mw @ v.co)
-            verts.append([round(float(p.x), 4), round(1.0 - float(p.y), 4)])
+            u, vv, _ = project_to_canvas(mw @ v.co, frame)
+            verts.append([round(float(u), 4), round(float(vv), 4)])
             if len(verts) >= 2000:
                 break
         edges = [[int(e.vertices[0]), int(e.vertices[1])] for e in me.edges][:4000]
@@ -547,17 +588,21 @@ def _pump():
         _tag_redraw()
 
     try:
-        state = build_state(scene)
-        if now - st.get("geo_t", 0.0) >= 0.2:
-            st["geo"] = build_geometry(scene)
+        rebuild_geo = (now - st.get("geo_t", 0.0) >= 0.2)
+        if rebuild_geo:
             st["geo_t"] = now
-        state["geo"] = st.get("geo", [])
-        st["state"] = state
         for rt in st["instances"].values():
             srv = rt["server"]
             if srv is None:
                 continue
             rec = instance_record(rt["name"])
+            plane = canvas_plane_of(rec)
+            state = build_state(scene, plane)
+            if rebuild_geo:
+                rt["geo"] = build_geometry(scene, plane)
+            state["geo"] = rt.get("geo", [])
+            if rec is not None and rec.name == _state.get("active"):
+                st["state"] = state
             w = int((rec.width if rec else 0) or scene.p5b_width)
             h = int((rec.height if rec else 0) or scene.p5b_height)
             srv.publish_state(json.dumps({**state, "w": w, "h": h}))
@@ -696,8 +741,8 @@ def cook_frame(frame: int | None = None, timeout: float = 5.0) -> int:
     scene.frame_set(target)
     w = int((rec.width if rec else 0) or scene.p5b_width)
     h = int((rec.height if rec else 0) or scene.p5b_height)
-    state = build_state(scene)
-    state["geo"] = build_geometry(scene)
+    state = build_state(scene, canvas_plane_of(rec))
+    state["geo"] = build_geometry(scene, canvas_plane_of(rec))
     state["w"] = w
     state["h"] = h
     fps = max(scene.render.fps, 1)
@@ -935,12 +980,41 @@ class P5B_OT_create_window(bpy.types.Operator):
                 self.report({"ERROR"}, st["error"])
                 return {"CANCELLED"}
             rt = _runtime(active_record().name)
-        ob = window.create_window_plane()
+        ob = window.create_window_plane(size=2.0)
         window.bind_window(ob, rt["live"].image, rec.material or "P5B_Canvas")
+        rec.plane = ob.name
         for o in context.selected_objects:
             o.select_set(False)
         ob.select_set(True)
         context.view_layer.objects.active = ob
+        return {"FINISHED"}
+
+
+class P5B_OT_standardize_plane(bpy.types.Operator):
+    bl_idname = "p5b.standardize_plane"
+    bl_label = "Standardize Canvas"
+    bl_description = "Put the canvas back to the standard: 2x2 square, flat on XY at the origin, no rotation"
+
+    def execute(self, context):
+        rec = active_record()
+        plane = canvas_plane_of(rec) if rec is not None else None
+        if plane is None:
+            self.report({"ERROR"}, "no canvas plane for this instance")
+            return {"CANCELLED"}
+        plane.location = (0.0, 0.0, 0.0)
+        plane.rotation_euler = (0.0, 0.0, 0.0)
+        plane.scale = (1.0, 1.0, 1.0)
+        # 网格本身也拉回 2x2（原位顶点，顶点数据不动 uv）
+        me = plane.data
+        if len(me.vertices) >= 4:
+            plane.data.vertices.foreach_set("co", [
+                -1.0, -1.0, 0.0,
+                 1.0, -1.0, 0.0,
+                 1.0,  1.0, 0.0,
+                -1.0,  1.0, 0.0,
+            ])
+            me.update()
+        self.report({"INFO"}, f"{plane.name} is 2x2 on XY at the origin")
         return {"FINISHED"}
 
 
@@ -1377,6 +1451,7 @@ class P5B_PT_canvas(bpy.types.Panel):
         row = layout.row(align=True)
         row.operator("p5b.bind_plane", text="Bind Mesh", icon="LINKED")
         row.operator("p5b.reset_material", text="Reset Material", icon="FILE_REFRESH")
+        layout.operator("p5b.standardize_plane", text="Standardize Canvas (2x2 on XY)", icon="MESH_GRID")
         rec = active_record()
         if rec is not None:
             layout.prop_search(rec, "texture", bpy.data, "images", text="Texture")
@@ -1522,6 +1597,7 @@ classes = (
     P5B_OT_open_host, P5B_OT_close_host,
     P5B_OT_create_window, P5B_OT_show_canvas, P5B_OT_track, P5B_OT_untrack,
     P5B_OT_bind_plane, P5B_OT_feedback, P5B_OT_mark_geo, P5B_OT_unmark_geo, P5B_OT_reset_material,
+    P5B_OT_standardize_plane,
     P5B_OT_cook_still, P5B_OT_cook_render, P5B_OT_render_animation,
     P5B_OT_instance_new, P5B_OT_instance_activate, P5B_OT_instance_start,
     P5B_OT_instance_stop, P5B_OT_instance_remove,

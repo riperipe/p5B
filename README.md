@@ -226,6 +226,28 @@ sketch 顶部可以声明两件事：
 一步到位看到效果：选中一个空物体 → `Tracking` → `Track Selected`；
 选中一个网格 → `Tracking` → `Send Geometry`；然后 `Run`。
 
+## 坐标约定（v0.17 起）
+
+**画布 = 一块 2×2 的正方形，平躺在 XY 平面上，位于原点、无旋转**——和 `Add > Mesh > Plane`
+建出来的东西完全一样。被跟踪物体、几何体都投影到**画布自己的局部坐标**，**跟相机没关系**：
+
+```
+u = 局部x / 2 + 0.5        v = 0.5 − 局部y / 2
+visible = u, v ∈ [0, 1]    depth = 离画布的高度（沿画布法线）
+```
+
+| 物体世界坐标 | canvas x / y | depth | visible |
+|---|---|---|---|
+| `(0, 0, 0)` 画布中心 | 0.5 / 0.5 | 0 | ✓ |
+| `(0.9, 0.9, 0)` 右上角 | 0.95 / 0.05 | 0 | ✓ |
+| `(1.4, 0, 0)` 画布外 | 1.2 / 0.5 | 0 | ✗ |
+| `(0.5, −0.5, 1.0)` 画布上方 1m | 0.75 / 0.75 | 1.0 | ✓ |
+
+- **相机怎么摆都不影响** sketch 拿到的坐标（相机只决定你从哪个角度看）
+- 多个实例的画布依次沿 **+X 偏移 2.5**，尺寸仍是 2×2、仍平躺在 XY
+- `Canvas → Standardize Canvas` 一键把画布拉回标准位置/尺寸/朝向
+- 几何体（Send Geometry）也是投影到画布上：物体在画布上方时的轮廓，就是它投在画布上的样子
+
 ## 默认材质（v0.16 起）
 
 `Create UV Window` / `New Instance` 建出来的材质结构：
@@ -373,6 +395,7 @@ if (tex) p.drawingContext.drawImage(tex, 0, 0, p.width, p.height);
 p5inBlender   状态行 + Start / Stop                 ← 只管开关
 Canvas        Show / Window Plane
               Bind Mesh / Reset Material
+              Standardize Canvas (2x2 on XY)
               Open / Background / Close（浏览器）
               Texture 下拉 + Feedback
               端口 W H
