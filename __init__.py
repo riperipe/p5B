@@ -29,7 +29,7 @@ from . import live_image, transport, window
 bl_info = {
     "name": "p5inBlender",
     "author": "DeepseekWorkzone",
-    "version": (0, 14, 0),
+    "version": (0, 15, 0),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > p5inBlender",
     "description": "Live 2D canvas as a UV-mapped texture, coded in Blender's text editor",
@@ -801,6 +801,52 @@ class P5B_OT_reset_sketch(bpy.types.Operator):
         return {"FINISHED"}
 
 
+def _write_authoring_bundle(folder: str) -> None:
+    """给外置编辑器准备 JS 语言支持（插件自带，不覆盖用户已有配置）。"""
+    vscode = os.path.join(folder, ".vscode")
+    os.makedirs(vscode, exist_ok=True)
+    settings = os.path.join(vscode, "settings.json")
+    if not os.path.exists(settings):
+        with open(settings, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(
+                "{\n"
+                '  // p5inBlender: JS 编辑体验\n'
+                '  "files.associations": { "*.js": "javascript" },\n'
+                '  "editor.tabSize": 2,\n'
+                '  "editor.quickSuggestions": { "other": true, "comments": false, "strings": false },\n'
+                '  "editor.formatOnSave": false,\n'
+                '  "javascript.suggest.autoImports": true\n'
+                "}\n"
+            )
+    jsconfig = os.path.join(folder, "jsconfig.json")
+    if not os.path.exists(jsconfig):
+        with open(jsconfig, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(
+                "{\n"
+                '  "compilerOptions": {\n'
+                '    "target": "ES2020",\n'
+                '    "lib": ["DOM", "ES2020"],\n'
+                '    "checkJs": false\n'
+                "  },\n"
+                '  "include": ["*.js"]\n'
+                "}\n"
+            )
+    readme = os.path.join(folder, "README.txt")
+    if not os.path.exists(readme):
+        with open(readme, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(
+                "p5inBlender 外置编辑目录\n"
+                "=========================\n\n"
+                "这些 .js 文件就是 Blender Text datablock 的镜像：\n"
+                "  - 在编辑器里改并保存 → 插件 0.3 秒内读回 Blender 并推给画布\n"
+                "  - Blender 里改了再点 Edit Externally 会重新导出\n\n"
+                "VS Code 建议装扩展：\n"
+                "  - ESLint（可选）\n"
+                "  - p5.vscode（自动补全 p5 API，作者 Sam Lavigne）\n\n"
+                "注意：Blender 内置文本编辑器只有 Python 着色规则，想要真正的 JS 高亮就用这里。\n"
+            )
+
+
 class P5B_OT_external_edit(bpy.types.Operator):
     bl_idname = "p5b.external_edit"
     bl_label = "Edit Externally"
@@ -827,6 +873,7 @@ class P5B_OT_external_edit(bpy.types.Operator):
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8", newline="\n") as fh:
             fh.write(text.as_string())
+        _write_authoring_bundle(os.path.dirname(path))
         try:
             _state["instances"].get(rec.name, {})["file_mtime"] = os.path.getmtime(path)
         except OSError:

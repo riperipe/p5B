@@ -226,6 +226,31 @@ sketch 顶部可以声明两件事：
 一步到位看到效果：选中一个空物体 → `Tracking` → `Track Selected`；
 选中一个网格 → `Tracking` → `Send Geometry`；然后 `Run`。
 
+## 语法高亮：为什么 Blender 里没法做，插件给的是什么
+
+先说结论：**Blender 内置文本编辑器没法装语言包。** 它的着色器是 C 里写死的
+Python tokenizer（`text_format.c`），Python API 只暴露了一个 `show_syntax_highlight`
+开关，没有语言注册接口。所以 `function` / `let` / `const` 永远不会有颜色——这不是插件偷懒，
+是内核限制；真要支持 JS 得改 Blender 源码重新编译。
+
+插件给的是**随插件一起生成的外置编辑环境**（`Sketch` 面板 → `Edit Externally`）：
+
+```
+p5inblender_sketches/
+├── <你的sketch>.js
+├── jsconfig.json            # JS 语义/补全配置
+├── README.txt               # 用法说明
+└── .vscode/settings.json    # tab=2、JS 关联、补全开关
+```
+
+配合 `Edit Externally` 的自动同步，实际体验是：**在 VS Code 里写（真正的 JS 高亮 + p5 API 补全），
+保存即生效**。建议再装两个 VS Code 扩展：
+
+- **p5.vscode**（Sam Lavigne）—— p5 API 自动补全，等于一个 p5 语言包
+- ESLint（可选）
+
+这些文件只在不存在时生成，不会覆盖你已有的编辑器配置。
+
 ## 语法高亮 / 用外部编辑器写
 
 Blender 的 Text Editor **只内置 Python 的着色规则**（`SpaceTextEditor` 里只有一个
