@@ -29,7 +29,7 @@ from . import live_image, transport, window
 bl_info = {
     "name": "p5inBlender",
     "author": "DeepseekWorkzone",
-    "version": (0, 20, 0),
+    "version": (0, 20, 1),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > p5inBlender",
     "description": "Live 2D canvas as a UV-mapped texture, coded in Blender's text editor",
@@ -285,6 +285,21 @@ _state = {
 
 
 # --------------------------------------------------------------------- helpers
+_ICON_CACHE = None
+
+
+def _icon(name: str) -> str:
+    """返回一个真实存在的图标名；名字写错也不会让面板 draw 抛异常（面板会闪烁）。"""
+    global _ICON_CACHE
+    if _ICON_CACHE is None:
+        try:
+            enum = bpy.types.UILayout.bl_rna.functions["label"].parameters["icon"].enum_items
+            _ICON_CACHE = {i.identifier for i in enum}
+        except Exception:
+            _ICON_CACHE = set()
+    return name if (not _ICON_CACHE or name in _ICON_CACHE) else "NONE"
+
+
 def _tag_redraw():
     for wm in bpy.data.window_managers:
         for win in wm.windows:
@@ -1404,19 +1419,19 @@ def _draw_status_and_start(layout):
     elif st["connected"]:
         text, icon = "connected, waiting for frames", "TIME"
     elif st["running"]:
-        text, icon = "listening, no canvas", "WIRE"
+        text, icon = "listening, no canvas", "SHADING_WIRE"
     else:
         text, icon = "stopped", "PAUSE"
 
     col = layout.column(align=True)
     col.label(text=text, icon=icon)
     if st["error"]:
-        col.label(text=st["error"][:64], icon="ERROR")
+        col.label(text=st["error"][:64], icon=_icon("ERROR"))
 
     row = layout.row(align=True)
     row.scale_y = 1.4
-    row.operator("p5b.start", text="Start", icon="PLAY")
-    row.operator("p5b.stop", text="Stop", icon="SNAP_FACE")
+    row.operator("p5b.start", text="Start", icon=_icon("PLAY"))
+    row.operator("p5b.stop", text="Stop", icon=_icon("SNAP_FACE"))
 
 
 class P5B_MT_menu(bpy.types.Menu):
@@ -1431,13 +1446,13 @@ class P5B_MT_menu(bpy.types.Menu):
         hs = st["host"]
         layout.label(text=f"{'live' if st['connected'] else 'stopped'} · {st['fps']} fps · host {hs['mode'] or 'off'}")
         layout.separator()
-        layout.operator("p5b.start", text="Start (background)", icon="PLAY")
-        layout.operator("p5b.stop", text="Stop", icon="SNAP_FACE")
+        layout.operator("p5b.start", text="Start (background)", icon=_icon("PLAY"))
+        layout.operator("p5b.stop", text="Stop", icon=_icon("SNAP_FACE"))
         layout.separator()
-        layout.operator("p5b.new_sketch", text="Edit Sketch", icon="TEXT")
-        layout.operator("p5b.run_sketch", text="Run Sketch", icon="SCRIPTPLUGINS")
+        layout.operator("p5b.new_sketch", text="Edit Sketch", icon=_icon("TEXT"))
+        layout.operator("p5b.run_sketch", text="Run Sketch", icon=_icon("SCRIPTPLUGINS"))
         layout.separator()
-        layout.operator("p5b.show_canvas", text="Show Live Canvas", icon="IMAGE_DATA")
+        layout.operator("p5b.show_canvas", text="Show Live Canvas", icon=_icon("IMAGE_DATA"))
 
 
 class P5B_PT_panel(bpy.types.Panel):
@@ -1466,32 +1481,32 @@ class P5B_PT_canvas(bpy.types.Panel):
         layout = self.layout
 
         row = layout.row(align=True)
-        row.operator("p5b.show_canvas", text="Show", icon="IMAGE_DATA")
-        row.operator("p5b.create_window", text="Window Plane", icon="MESH_PLANE")
+        row.operator("p5b.show_canvas", text="Show", icon=_icon("IMAGE_DATA"))
+        row.operator("p5b.create_window", text="Window Plane", icon=_icon("MESH_PLANE"))
         row = layout.row(align=True)
-        row.operator("p5b.bind_plane", text="Bind Mesh", icon="LINKED")
-        row.operator("p5b.reset_material", text="Reset Material", icon="FILE_REFRESH")
-        layout.operator("p5b.standardize_plane", text="Standardize Canvas (2x2 on XY)", icon="MESH_GRID")
+        row.operator("p5b.bind_plane", text="Bind Mesh", icon=_icon("LINKED"))
+        row.operator("p5b.reset_material", text="Reset Material", icon=_icon("FILE_REFRESH"))
+        layout.operator("p5b.standardize_plane", text="Standardize Canvas (2x2 on XY)", icon=_icon("MESH_GRID"))
         layout.prop(context.scene, "p5b_show_hud", text="Show Live Info")
         rec = active_record()
         if rec is not None:
             layout.prop_search(rec, "texture", bpy.data, "images", text="Texture")
             row = layout.row(align=True)
-            row.operator("p5b.feedback", text="Feedback", icon="LOOP_BACK")
+            row.operator("p5b.feedback", text="Feedback", icon=_icon("LOOP_BACK"))
 
         row = layout.row(align=True)
-        op = row.operator("p5b.open_host", text="Open", icon="WINDOW")
+        op = row.operator("p5b.open_host", text="Open", icon=_icon("WINDOW"))
         op.mode = "window"
-        op = row.operator("p5b.open_host", text="Background", icon="HIDE_ON")
+        op = row.operator("p5b.open_host", text="Background", icon=_icon("HIDE_ON"))
         op.mode = "headless"
-        row.operator("p5b.close_host", text="", icon="X")
+        row.operator("p5b.close_host", text="", icon=_icon("X"))
         layout.label(text=f"host: {hs['mode'] or 'off'}" + (f" (pid {hs['pid']})" if hs["pid"] else ""))
 
         row = layout.row(align=True)
         row.prop(sc, "p5b_port", text="")
         row.prop(sc, "p5b_width", text="W")
         row.prop(sc, "p5b_height", text="H")
-        layout.label(text=f"127.0.0.1:{st['port'] or sc.p5b_port}", icon="URL")
+        layout.label(text=f"127.0.0.1:{st['port'] or sc.p5b_port}", icon=_icon("URL"))
 
 
 class P5B_PT_sketch(bpy.types.Panel):
@@ -1508,15 +1523,15 @@ class P5B_PT_sketch(bpy.types.Panel):
         layout = self.layout
         row = layout.row(align=True)
         row.scale_y = 1.2
-        row.operator("p5b.run_sketch", text="Run", icon="PLAY")
-        row.operator("p5b.new_sketch", text="Edit", icon="TEXT")
+        row.operator("p5b.run_sketch", text="Run", icon=_icon("PLAY"))
+        row.operator("p5b.new_sketch", text="Edit", icon=_icon("TEXT"))
         if rec is not None:
             layout.prop_search(rec, "text", bpy.data, "texts", text="Sketch")
             if bpy.data.texts.get(rec.text) is None:
-                layout.label(text=f"missing text: {rec.text}", icon="ERROR")
+                layout.label(text=f"missing text: {rec.text}", icon=_icon("ERROR"))
         row = layout.row(align=True)
-        row.operator("p5b.external_edit", text="Edit Externally", icon="TEXT")
-        row.operator("p5b.reset_sketch", text="Reset Demo", icon="FILE_REFRESH")
+        row.operator("p5b.external_edit", text="Edit Externally", icon=_icon("TEXT"))
+        row.operator("p5b.reset_sketch", text="Reset Demo", icon=_icon("FILE_REFRESH"))
         layout.prop(context.scene, "p5b_auto_run", text="Auto Run on Edit")
         layout.label(text=f"v{st['sketch_version']} · {st['frames']} frames · {st['dropped']} dropped")
 
@@ -1533,16 +1548,16 @@ class P5B_PT_tracking(bpy.types.Panel):
         st = stats_snapshot()
         layout = self.layout
         row = layout.row(align=True)
-        row.operator("p5b.track", text="Track Selected", icon="TRACKER")
-        row.operator("p5b.untrack", text="", icon="CANCEL")
+        row.operator("p5b.track", text="Track Selected", icon=_icon("TRACKER"))
+        row.operator("p5b.untrack", text="", icon=_icon("CANCEL"))
         row = layout.row(align=True)
-        row.operator("p5b.mark_geo", text="Send Geometry", icon="MESH_DATA")
-        row.operator("p5b.unmark_geo", text="", icon="X")
+        row.operator("p5b.mark_geo", text="Send Geometry", icon=_icon("MESH_DATA"))
+        row.operator("p5b.unmark_geo", text="", icon=_icon("X"))
         objs = (st.get("state") or {}).get("objects") or []
         if st["tracked"]:
             layout.label(text=f"tracked {st['tracked']} · on screen {st['visible']}")
             if st["visible"] == 0:
-                layout.label(text="tracked objects are off-screen (check the camera)", icon="ERROR")
+                layout.label(text="tracked objects are off-screen (check the camera)", icon=_icon("ERROR"))
         else:
             layout.label(text="no tracked object")
         layout.label(text=f"{st['tracked']} object(s) sent to the sketch")
@@ -1561,9 +1576,9 @@ class P5B_PT_render(bpy.types.Panel):
         st = stats_snapshot()
         layout = self.layout
         row = layout.row(align=True)
-        row.operator("p5b.cook_still", text="Cook", icon="IMAGE_REFERENCE")
-        row.operator("p5b.cook_render", text="Cook + Render", icon="RENDER_STILL")
-        layout.operator("p5b.render_animation", icon="RENDER_ANIMATION")
+        row.operator("p5b.cook_still", text="Cook", icon=_icon("IMAGE_REFERENCE"))
+        row.operator("p5b.cook_render", text="Cook + Render", icon=_icon("RENDER_STILL"))
+        layout.operator("p5b.render_animation", icon=_icon("RENDER_ANIMATION"))
         layout.label(text=f"{st['cooks']} cook request(s)")
 
 
@@ -1578,20 +1593,20 @@ class P5B_PT_instances(bpy.types.Panel):
         sc = context.scene
         st = stats_snapshot()
         layout = self.layout
-        layout.operator("p5b.instance_new", text="New Instance", icon="ADD")
+        layout.operator("p5b.instance_new", text="New Instance", icon=_icon("ADD"))
         if not st["instances"]:
             layout.label(text="no instance yet — press Start")
         for i, row in enumerate(st["instances"]):
             line = layout.row(align=True)
             op = line.operator("p5b.instance_activate", text=row["name"], emboss=False,
-                               icon="RADIOBUT_ON" if i == sc.p5b_active else "RADIOBUT_OFF")
+                               icon=_icon("RADIOBUT_ON") if i == sc.p5b_active else "RADIOBUT_OFF")
             op.index = i
             line.label(text=f"{row['port']} · " + (f"{row['fps']}fps" if row["running"] else "off"))
-            op = line.operator("p5b.instance_start", text="", icon="PLAY")
+            op = line.operator("p5b.instance_start", text="", icon=_icon("PLAY"))
             op.name = row["name"]
-            op = line.operator("p5b.instance_stop", text="", icon="SNAP_FACE")
+            op = line.operator("p5b.instance_stop", text="", icon=_icon("SNAP_FACE"))
             op.name = row["name"]
-            op = line.operator("p5b.instance_remove", text="", icon="X")
+            op = line.operator("p5b.instance_remove", text="", icon=_icon("X"))
             op.name = row["name"]
 
 
@@ -1607,7 +1622,7 @@ class P5B_PT_text_sidebar(bpy.types.Panel):
     def draw(self, context):
         st = stats_snapshot()
         layout = self.layout
-        layout.operator("p5b.run_sketch", text="Run", icon="PLAY")
+        layout.operator("p5b.run_sketch", text="Run", icon=_icon("PLAY"))
         layout.label(text=f"{'live' if st['connected'] else 'off'} · v{st['sketch_version']} · {st['fps']} fps")
 
 
@@ -1636,12 +1651,38 @@ def _draw_header_menu(self, context):
     self.layout.menu("P5B_MT_menu", text="p5inBlender")
 
 
+def _guard_panel_draws(classes):
+    """面板 draw 里任何异常都不该让整个侧栏闪烁/空白：捕获后画成一行红字。"""
+    def wrap(fn):
+        def safe(self, context):
+            try:
+                return fn(self, context)
+            except Exception as exc:  # noqa: BLE001
+                try:
+                    self.layout.label(text=("panel error: " + str(exc))[:90], icon=_icon("ERROR"))
+                except Exception:
+                    pass
+                return None
+        return safe
+
+    for cls in classes:
+        fn = cls.__dict__.get("draw")
+        if fn is None or not getattr(cls, "bl_space_type", None) and not getattr(cls, "bl_idname", "").startswith("P5B_MT"):
+            continue
+        if getattr(fn, "__p5b_guarded", False):
+            continue
+        wrapped = wrap(fn)
+        wrapped.__p5b_guarded = True
+        cls.draw = wrapped
+
+
 def register():
     for cls in classes:
         try:
             bpy.utils.register_class(cls)
         except ValueError:
             pass
+    _guard_panel_draws(classes)
     for prop, kwargs in (
         ("p5b_port", dict(name="Port", default=DEFAULT_PORT, min=1024, max=65535)),
         ("p5b_width", dict(name="W", default=640, min=16, max=4096)),
