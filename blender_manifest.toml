@@ -10,10 +10,7 @@ version = "0.21.0"
 
 blender_version_min = "4.2.0"
 
-license = ["SPDX:MIT"]
+license = ["SPDX:GPL-3.0-or-later"]
 
 [permissions]
 network = "Loopback socket on 127.0.0.1 to stream canvas frames"
-
-[urls]
-documentation = "https://github.com/YOURNAME/p5inBlender#readme"
