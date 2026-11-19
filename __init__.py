@@ -32,7 +32,7 @@ _t = _i18n.t
 bl_info = {
     "name": "p5B",
     "author": "DeepseekWorkzone",
-    "version": (0, 22, 2),
+    "version": (0, 22, 3),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > p5B",
     "description": "Live 2D canvas as a UV-mapped texture, coded in Blender's text editor",
@@ -1160,7 +1160,7 @@ class P5B_OT_feedback(bpy.types.Operator):
     bl_label = "自身画布作纹理"
     bl_description = _t(
         "把当前实例的画布图像设为它的上游纹理，sketch 每 0.1 秒能读到上一帧"
-        "（视频反馈：拖影、万花筒）。不是撤销/返回"
+        "（反馈举例：拖影、万花筒）。不是撤销/返回"
     )
 
     @classmethod

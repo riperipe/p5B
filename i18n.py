@@ -44,9 +44,9 @@ EN = {
     "面板错误：{msg}": "panel error: {msg}",
     # 描述（bl_description）
     "把当前实例的画布图像设为它的上游纹理，sketch 每 0.1 秒能读到上一帧"
-    "（视频反馈：拖影、万花筒）。不是撤销/返回":
+    "（反馈举例：拖影、万花筒）。不是撤销/返回":
         "Feed this instance's canvas back into its own sketch as an upstream texture; "
-        "the sketch can read the previous frame every 0.1 s (video feedback: trails, "
+        "the sketch can read the previous frame every 0.1 s (feedback examples: trails, "
         "kaleidoscope). This is NOT undo/redo",
     "在文本编辑器里改哪份 sketch，就自动让实例跑哪份（避免改了别的文件没反应）":
         "Run whichever sketch you are editing in the Text Editor "

@@ -6,7 +6,7 @@ tagline = "Unofficial add-on: code p5.js in Blender, canvas as a UV texture"
 maintainer = "DeepseekWorkzone"
 type = "add-on"
 
-version = "0.22.2"
+version = "0.22.3"
 
 blender_version_min = "4.2.0"
 
