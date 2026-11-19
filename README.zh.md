@@ -9,7 +9,7 @@
 
 [下载最新版](../../releases/latest) · [第三方声明](THIRD-PARTY.md) · [路线图](PLAN.md)
 
-![p5 2.4 上跑的 glitch sketch](docs/demo_glitch.jpg)
+![p5 2.4 上跑的 glitch sketch](docs/demo_glitch.png)
 
 ## 环境要求
 

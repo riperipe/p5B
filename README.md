@@ -9,7 +9,7 @@ window opens on your model.
 
 [中文说明](README.zh.md) · [Download](../../releases/latest) · [Third-party notices](THIRD-PARTY.md)
 
-![glitch sketch running on p5 2.4](docs/demo_glitch.jpg)
+![glitch sketch running on p5 2.4](docs/demo_glitch.png)
 
 ## Requirements
 
