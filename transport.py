@@ -170,6 +170,7 @@ class FrameServer:
         self._cid_counter = itertools.count(1)
         self._tls = threading.local()
         self._owner_client = None
+        self._owner_conn = None
 
     # ---------------------------------------------------------------- lifecycle
     def start(self) -> bool:
@@ -304,6 +305,7 @@ class FrameServer:
             self._active -= 1
             if self._owner_client == cid:
                 self._owner_client = None
+                self._owner_conn = None
             try:
                 conn.close()
             except OSError:
@@ -407,6 +409,7 @@ class FrameServer:
     def _serve_raw(self, conn: socket.socket, head: bytes) -> None:
         """Plain TCP carries v1 frames only (local helpers, synthetic senders)."""
         self.stats["protocol"] = "tcp"
+        self._claim_canvas(conn)
         conn.settimeout(10.0)
         pending = head
         while not self._stop.is_set():
@@ -445,6 +448,7 @@ class FrameServer:
         except OSError:
             return
         self.stats["protocol"] = "websocket"
+        self._claim_canvas(conn)
         self._sketch_dirty = True
         conn.settimeout(10.0)
         stop_evt = threading.Event()
@@ -584,6 +588,18 @@ class FrameServer:
                 self._push(seq, w, h, planes)
 
     # -------------------------------------------------------------------- queue
+    def _claim_canvas(self, conn: socket.socket) -> None:
+        """最新的流媒体连接接管画布。
+
+        注意：**不要**主动关掉上一条连接——浏览器页面会自动重连，两边互踢就会
+        变成不停重连的风暴。这里只记录谁是当前写入者，其余连接的帧在 _push 里丢弃。
+        """
+        cid = getattr(self._tls, "cid", -1)
+        if self._owner_client is not None and self._owner_client != cid:
+            self.stats["superseded_clients"] = self.stats.get("superseded_clients", 0) + 1
+        self._owner_conn = conn
+        self._owner_client = cid
+
     def _push(self, seq: int, width: int, height: int, planes: dict) -> None:
         # 只接受"当前客户端"的帧：浏览器重连时旧连接可能还在发，两路交替写入
         # 同一张图，画面就会闪。最新的流媒体客户端拥有画布。
