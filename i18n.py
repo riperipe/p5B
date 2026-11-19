@@ -44,16 +44,10 @@ EN = {
     "面板错误：{msg}": "panel error: {msg}",
     # 描述（bl_description）
     "把当前实例的画布图像设为它的上游纹理，sketch 每 0.1 秒能读到上一帧"
-    "（视频反馈：拖影、万花筒、自相似）\n"
-    "不是撤销/返回。\n"
-    "效果等于在「纹理」下拉框里选中这个实例自己的画布图像——"
-    "图像名由实例决定（不一定是 P5B_live_ 开头），下拉框里现在就写着它的名字":
+    "（视频反馈：拖影、万花筒）。不是撤销/返回":
         "Feed this instance's canvas back into its own sketch as an upstream texture; "
         "the sketch can read the previous frame every 0.1 s (video feedback: trails, "
-        "kaleidoscope, self-similarity).\n"
-        "This is NOT undo/redo.\n"
-        "Same as picking the instance's own canvas image in the Texture dropdown — "
-        "the image name depends on the instance (not necessarily starting with P5B_live_).",
+        "kaleidoscope). This is NOT undo/redo",
     "在文本编辑器里改哪份 sketch，就自动让实例跑哪份（避免改了别的文件没反应）":
         "Run whichever sketch you are editing in the Text Editor "
         "(avoids editing a file that is not the one being run)",

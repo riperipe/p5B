@@ -32,7 +32,7 @@ _t = _i18n.t
 bl_info = {
     "name": "p5B",
     "author": "DeepseekWorkzone",
-    "version": (0, 22, 0),
+    "version": (0, 22, 2),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > p5B",
     "description": "Live 2D canvas as a UV-mapped texture, coded in Blender's text editor",
@@ -1160,10 +1160,7 @@ class P5B_OT_feedback(bpy.types.Operator):
     bl_label = "自身画布作纹理"
     bl_description = _t(
         "把当前实例的画布图像设为它的上游纹理，sketch 每 0.1 秒能读到上一帧"
-        "（视频反馈：拖影、万花筒、自相似）\n"
-        "不是撤销/返回。\n"
-        "效果等于在「纹理」下拉框里选中这个实例自己的画布图像——"
-        "图像名由实例决定（不一定是 P5B_live_ 开头），下拉框里现在就写着它的名字"
+        "（视频反馈：拖影、万花筒）。不是撤销/返回"
     )
 
     @classmethod
@@ -1754,6 +1751,15 @@ def _guard_panel_draws(classes):
         cls.draw = wrapped
 
 
+def _translation_dict():
+    """Blender 官方翻译表：算子的 label/description、属性名由 Blender 绘制时翻译。
+
+    面板里动态拼的字符串走 _t()；这里负责"类属性在导入时就固定"的文案，
+    否则切换界面语言必须重启才生效。
+    """
+    return {"en_US": {("*", zh): en for zh, en in _i18n.EN.items()}}
+
+
 def register():
     for cls in classes:
         try:
@@ -1783,6 +1789,12 @@ def register():
             name="Show Live Info", default=True,
             description="Show the live readout (fps/objects/state) in the canvas; "
                         "sketches read it as p5inblender.hud")
+    try:
+        bpy.app.translations.unregister(__name__)
+    except Exception:
+        pass
+    bpy.app.translations.register(__name__, _translation_dict())
+
     if _on_load_post not in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.append(_on_load_post)
     try:
@@ -1793,6 +1805,10 @@ def register():
 
 
 def unregister():
+    try:
+        bpy.app.translations.unregister(__name__)
+    except Exception:
+        pass
     stop_bridge()
     try:
         bpy.types.VIEW3D_MT_editor_menus.remove(_draw_header_menu)
