@@ -85,6 +85,12 @@
   继续被当成当前画面发回 Blender；新 sketch 其实已经在跑（只是没被看到）。
 - 修法：`destroySketch()` 里 `iframeCanvas = null`。
 
+**M5.8 修：点 Run 报 KeyError: 'server'** ✅
+- 多实例重构时删掉了 `_state["server"]`，但 `run_sketch` / `open_host` / `render_animation`
+  三个算子还留着旧写法。
+- 修法：全部改成走 `active_record()` + `_runtime()`；同时让 `Run` 在没有画布客户端时
+  自动拉起后台 host（点 Run 就该看到东西）。
+
 **M6 — 平台与分发**（macOS 暂缓，用户明确说不急）
 - macOS 适配（自备 Chromium，不用 WKWebView）
 - 打包：blender_manifest + 可选 Spout/Syphon 加速通道

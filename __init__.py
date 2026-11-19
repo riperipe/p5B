@@ -29,7 +29,7 @@ from . import live_image, transport, window
 bl_info = {
     "name": "p5inBlender",
     "author": "DeepseekWorkzone",
-    "version": (0, 15, 0),
+    "version": (0, 15, 1),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > p5inBlender",
     "description": "Live 2D canvas as a UV-mapped texture, coded in Blender's text editor",
@@ -899,16 +899,24 @@ class P5B_OT_run_sketch(bpy.types.Operator):
 
     def execute(self, context):
         sc = context.scene
-        if _state["server"] is None:
-            if not start_bridge(int(sc.p5b_port), int(sc.p5b_width), int(sc.p5b_height)):
-                self.report({"ERROR"}, _state["error"])
+        rec = active_record()
+        rt = _runtime(rec.name) if rec is not None else None
+        if rt is None or rt["server"] is None or not rt["server"].running:
+            if not start_bridge(0, int(sc.p5b_width), int(sc.p5b_height)):
+                self.report({"ERROR"}, _state["error"] or "failed to start receiver")
                 return {"CANCELLED"}
+            rec = active_record()
+            rt = _runtime(rec.name) if rec is not None else None
         ver = push_sketch()
         if ver == 0:
-            self.report({"ERROR"}, f"no text named {SKETCH_NAME}")
+            self.report({"ERROR"}, _state["error"] or "no sketch text")
             return {"CANCELLED"}
-        connected = bool(_state["server"] and _state["server"].connected)
-        self.report({"INFO"}, f"sketch v{ver} pushed ({'live' if connected else 'waiting for browser'})")
+        # 没有画布客户端就顺手开一个后台的（用户点 Run 的预期是"立刻看到"）
+        if not host_status()["alive"] and rec is not None:
+            launch_host("headless", int(rec.port))
+        connected = bool(rt and rt["server"] and rt["server"].connected)
+        self.report({"INFO"}, f"sketch v{ver} on {(rec.name if rec else '?')} "
+                              f"({'live' if connected else 'waiting for browser'})")
         return {"FINISHED"}
 
 
@@ -1072,8 +1080,10 @@ class P5B_OT_open_host(bpy.types.Operator):
 
     def execute(self, context):
         sc = context.scene
-        if _state["server"] is None:
-            if not start_bridge(int(sc.p5b_port), int(sc.p5b_width), int(sc.p5b_height)):
+        rec = active_record()
+        rt = _runtime(rec.name) if rec is not None else None
+        if rt is None or rt["server"] is None or not rt["server"].running:
+            if not start_bridge(0, int(sc.p5b_width), int(sc.p5b_height)):
                 self.report({"ERROR"}, _state["error"])
                 return {"CANCELLED"}
         rec = active_record()
@@ -1104,7 +1114,9 @@ class P5B_OT_render_animation(bpy.types.Operator):
 
     def execute(self, context):
         sc = context.scene
-        srv = _state["server"]
+        rec = active_record()
+        rt = _runtime(rec.name) if rec is not None else None
+        srv = rt["server"] if rt else None
         if srv is None or not srv.connected:
             self.report({"ERROR"}, "host not connected — start the receiver and the canvas first")
             return {"CANCELLED"}
