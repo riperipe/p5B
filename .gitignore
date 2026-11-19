@@ -5,6 +5,7 @@ __pycache__/
 *.blend2
 .tmp/
 .DS_Store
+p5b-*.zip
 p5inBlender-*.zip
 p5inBlender_sketches/
 *.png.tmp
