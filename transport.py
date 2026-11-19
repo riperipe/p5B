@@ -165,6 +165,12 @@ class FrameServer:
         self._thread = None
         self._stop = threading.Event()
 
+        # 谁在往画布上写：浏览器重连时旧连接可能还在发帧，两路交替会让画面闪。
+        import itertools
+        self._cid_counter = itertools.count(1)
+        self._tls = threading.local()
+        self._owner_client = None
+
     # ---------------------------------------------------------------- lifecycle
     def start(self) -> bool:
         if self._thread is not None and self._thread.is_alive():
@@ -289,11 +295,15 @@ class FrameServer:
                              name="p5bridge-client", daemon=True).start()
 
     def _serve_thread(self, conn: socket.socket) -> None:
+        cid = next(self._cid_counter)
+        self._tls.cid = cid
         self._active += 1
         try:
             self._serve(conn)
         finally:
             self._active -= 1
+            if self._owner_client == cid:
+                self._owner_client = None
             try:
                 conn.close()
             except OSError:
@@ -575,6 +585,14 @@ class FrameServer:
 
     # -------------------------------------------------------------------- queue
     def _push(self, seq: int, width: int, height: int, planes: dict) -> None:
+        # 只接受"当前客户端"的帧：浏览器重连时旧连接可能还在发，两路交替写入
+        # 同一张图，画面就会闪。最新的流媒体客户端拥有画布。
+        cid = getattr(self._tls, "cid", -1)
+        if self._owner_client is None:
+            self._owner_client = cid
+        elif cid != self._owner_client:
+            self.stats["stale_frames"] = self.stats.get("stale_frames", 0) + 1
+            return
         self.stats["frames"] += 1
         self.stats["bytes"] += sum(len(v) for v in planes.values())
         self._last_frame_ts = time.time()

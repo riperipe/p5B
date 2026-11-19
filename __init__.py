@@ -1,16 +1,13 @@
-# p5inBlender — 把 2D 画布当作实时纹理喂进 Blender
+# p5inBlender �?�?2D 画布当作实时纹理喂进 Blender
 #
-# 结构：
-#   transport.py   端口上同时提供 HTTP（宿主页面）+ WebSocket（像素上行 / 状态下行）
+# 结构�?#   transport.py   端口上同时提�?HTTP（宿主页面）+ WebSocket（像素上�?/ 状态下行）
 #   live_image.py  Image datablock 写入（已实测色彩空间规则，见文件头）
-#   window.py      UV 窗口平面 + 材质节点树（UV -> Mapping -> Image -> Emission）
-#   host/index.html  浏览器端宿主：接收 sketch 源码与场景快照，逐帧回传像素
+#   window.py      UV 窗口平面 + 材质节点树（UV -> Mapping -> Image -> Emission�?#   host/index.html  浏览器端宿主：接�?sketch 源码与场景快照，逐帧回传像素
 #
 # 工作流：
-#   1. 点 "New Sketch" 生成 Text datablock p5b_sketch.js，并切出一个 Text Editor
-#   2. 在 Blender 里改 JS，点 "Run"
-#   3. 浏览器打开 http://127.0.0.1:9877/ ，Image Editor 与贴了材质的模型立刻出画面
-
+#   1. �?"New Sketch" 生成 Text datablock p5b_sketch.js，并切出一�?Text Editor
+#   2. �?Blender 里改 JS，点 "Run"
+#   3. 浏览器打开 http://127.0.0.1:9877/ ，Image Editor 与贴了材质的模型立刻出画�?
 import json
 import os
 import queue
@@ -29,7 +26,7 @@ from . import live_image, transport, window
 bl_info = {
     "name": "p5inBlender",
     "author": "DeepseekWorkzone",
-    "version": (0, 20, 2),
+    "version": (0, 20, 3),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > p5inBlender",
     "description": "Live 2D canvas as a UV-mapped texture, coded in Blender's text editor",
@@ -93,8 +90,7 @@ def launch_host(mode: str = "window", port: int = DEFAULT_PORT):
         "--no-default-browser-check",
         "--disable-extensions",
         "--mute-audio",
-        # 这几条是"浏览器被 Blender 遮住就停止出帧"的解药
-        "--disable-background-timer-throttling",
+        # 这几条是"浏览器被 Blender 遮住就停止出�?的解�?        "--disable-background-timer-throttling",
         "--disable-renderer-backgrounding",
         "--disable-backgrounding-occluded-windows",
         "--disable-features=CalculateNativeWinOcclusion",
@@ -155,15 +151,10 @@ def host_status() -> dict:
             "pid": last["proc"].pid if last else None,
             "ports": [h["port"] for h in hosts]}
 
-TEMPLATE = r"""// p5b_sketch.js —— p5inBlender demo
+TEMPLATE = r"""// p5b_sketch.js —�?p5inBlender demo
 //
-// 这一份同时演示三件事：
-//   1. 被跟踪物体（Tracking → Track Selected）的屏幕坐标，画成带拖尾的光点
-//   2. 模型线框（Tracking → Send Geometry），Blender 投影好直接画线
-//   3. 上游纹理（Canvas → Texture / Feedback），当背景画，做自反馈
-//
-// 改完不用点 Run（Auto Run on Edit 开着时约 0.3 秒自动生效）。
-
+// 这一份同时演示三件事�?//   1. 被跟踪物体（Tracking �?Track Selected）的屏幕坐标，画成带拖尾的光�?//   2. 模型线框（Tracking �?Send Geometry），Blender 投影好直接画�?//   3. 上游纹理（Canvas �?Texture / Feedback），当背景画，做自反�?//
+// 改完不用�?Run（Auto Run on Edit 开着时约 0.3 秒自动生效）�?
 let trails = {};
 
 function sketch(p) {
@@ -181,8 +172,7 @@ function sketch(p) {
     const geo = state.geo || [];
     const tex = D.texture;
 
-    // 1) 背景：有上游纹理就铺纹理（自反馈），否则用半透明覆盖做拖尾
-    if (tex) {
+    // 1) 背景：有上游纹理就铺纹理（自反馈），否则用半透明覆盖做拖�?    if (tex) {
       p.push();
       p.translate(p.width / 2, p.height / 2);
       p.rotate(0.0012 * (p.frameCount % 2000));
@@ -203,8 +193,7 @@ function sketch(p) {
     for (let x = 0; x < p.width; x += 48) p.line(x, 0, x, p.height);
     for (let y = 0; y < p.height; y += 48) p.line(0, y, p.width, y);
 
-    // 3) 几何线框：Blender 已经投影到 0..1，这里只乘尺寸
-    geo.forEach(function (g) {
+    // 3) 几何线框：Blender 已经投影�?0..1，这里只乘尺�?    geo.forEach(function (g) {
       p.noFill();
       p.strokeWeight(1.2);
       p.stroke(0, 255, 190, 90);
@@ -257,8 +246,7 @@ function sketch(p) {
       p.text(o.name, x + 22, y - 16);
     });
 
-    // 5) HUD（N 面板 Canvas → Show Live Info 控制，读 p5inblender.hud）
-    if (D.hud !== false) {
+    // 5) HUD（N 面板 Canvas �?Show Live Info 控制，读 p5inblender.hud�?    if (D.hud !== false) {
       p.noStroke();
       p.fill(200, 230, 255, 190);
       p.textSize(11);
@@ -289,7 +277,7 @@ _ICON_CACHE = None
 
 
 def _icon(name: str) -> str:
-    """返回一个真实存在的图标名；名字写错也不会让面板 draw 抛异常（面板会闪烁）。"""
+    """返回一个真实存在的图标名；名字写错也不会让面板 draw 抛异常（面板会闪烁）�?""
     global _ICON_CACHE
     if _ICON_CACHE is None:
         try:
@@ -304,11 +292,8 @@ _LAST_TAG = 0.0
 
 
 def _tag_redraw(force: bool = False, hz: float = 16.0):
-    """刷新发生变化的区域。
-
-    每秒跟着帧率 tag 整个界面（以前是 60~100 次/秒，还把 TEXT_EDITOR/PROPERTIES 一起
-    标脏）会让侧栏和视口看起来一直在闪。这里限到 16 Hz，而且只标真正显示图像的区域。
-    """
+    """刷新发生变化的区域�?
+    每秒跟着帧率 tag 整个界面（以前是 60~100 �?秒，还把 TEXT_EDITOR/PROPERTIES 一�?    标脏）会让侧栏和视口看起来一直在闪。这里限�?16 Hz，而且只标真正显示图像的区域�?    """
     global _LAST_TAG
     now = time.perf_counter()
     if not force and now - _LAST_TAG < (1.0 / max(hz, 1.0)):
@@ -325,11 +310,8 @@ def _tag_redraw(force: bool = False, hz: float = 16.0):
 
 
 def canvas_frame(plane, img_size=None):
-    """画布坐标系：以画布平面自身为准（和相机无关）。
-
-    画布是 XY 平面上的 2x2 方片（同 Add > Mesh > Plane）。图像按原比例居中放进
-    这块方片（letterbox，不拉伸），所以物体坐标 = 图像内的归一化坐标。
-    """
+    """画布坐标系：以画布平面自身为准（和相机无关）�?
+    画布�?XY 平面上的 2x2 方片（同 Add > Mesh > Plane）。图像按原比例居中放�?    这块方片（letterbox，不拉伸），所以物体坐�?= 图像内的归一化坐标�?    """
     if plane is None:
         return None
     mw = plane.matrix_world
@@ -347,13 +329,13 @@ def canvas_frame(plane, img_size=None):
 
 
 def project_to_canvas(point, frame):
-    """世界坐标 → 画布 uv（u 向右、v 向下，和图像坐标一致）+ 离画布高度。"""
+    """世界坐标 �?画布 uv（u 向右、v 向下，和图像坐标一致）+ 离画布高度�?""
     if frame is None:
         return 0.0, 0.0, 0.0
     local = frame["inv"] @ Vector(point)
     u = (local.x - frame["cx"]) / frame["sx"] + 0.5
     v = 0.5 - (local.y - frame["cy"]) / frame["sy"]
-    # 方片坐标 → 图像坐标（图像只占方片中间一条）
+    # 方片坐标 �?图像坐标（图像只占方片中间一条）
     u = (u - 0.5) / frame["fx"] + 0.5
     v = (v - 0.5) / frame["fy"] + 0.5
     return u, v, local.z
@@ -588,8 +570,7 @@ def _pump():
                 rt["ar_t"] = now
                 text = bpy.data.texts.get(rec.text)
                 if text is not None:
-                    # 外部编辑器改了磁盘文件？读回来再推送
-                    if text.filepath:
+                    # 外部编辑器改了磁盘文件？读回来再推�?                    if text.filepath:
                         try:
                             mtime = os.path.getmtime(bpy.path.abspath(text.filepath))
                         except OSError:
@@ -621,8 +602,7 @@ def _pump():
             dt = now - rt["t0"]
             if dt >= 0.5:
                 measured = rt["n"] / dt
-                # 平滑一下，面板上那个 fps 不要每半秒跳一次
-                rt["fps"] = measured if rt["fps"] <= 0 else rt["fps"] * 0.6 + measured * 0.4
+                # 平滑一下，面板上那�?fps 不要每半秒跳一�?                rt["fps"] = measured if rt["fps"] <= 0 else rt["fps"] * 0.6 + measured * 0.4
                 rt["n"] = 0
                 rt["t0"] = now
             pushed_total += pushed
@@ -767,6 +747,7 @@ def stats_snapshot():
         "client_p5": (srv.stats.get("client_p5") if srv else None),
         "textures": (srv.stats.get("textures", 0) if srv else 0),
         "tex_acks": (srv.stats.get("tex_acks", 0) if srv else 0),
+        "stale_frames": (srv.stats.get("stale_frames", 0) if srv else 0),
         "instance": (rec.name if rec is not None else None),
         "instances": rows,
         "error": st["error"] or (srv.error if srv else ""),
@@ -876,7 +857,7 @@ class P5B_OT_new_sketch(bpy.types.Operator):
                         area.type = "TEXT_EDITOR"
                         area.spaces.active.text = text
                         shown = True
-        self.report({"INFO"}, f"editing {rec.name} → {rec.text}")
+        self.report({"INFO"}, f"editing {rec.name} �?{rec.text}")
         return {"FINISHED"}
 
 
@@ -898,7 +879,7 @@ class P5B_OT_reset_sketch(bpy.types.Operator):
 
 
 def _write_authoring_bundle(folder: str) -> None:
-    """给外置编辑器准备 JS 语言支持（插件自带，不覆盖用户已有配置）。"""
+    """给外置编辑器准备 JS 语言支持（插件自带，不覆盖用户已有配置）�?""
     vscode = os.path.join(folder, ".vscode")
     os.makedirs(vscode, exist_ok=True)
     settings = os.path.join(vscode, "settings.json")
@@ -934,12 +915,12 @@ def _write_authoring_bundle(folder: str) -> None:
                 "p5inBlender 外置编辑目录\n"
                 "=========================\n\n"
                 "这些 .js 文件就是 Blender Text datablock 的镜像：\n"
-                "  - 在编辑器里改并保存 → 插件 0.3 秒内读回 Blender 并推给画布\n"
-                "  - Blender 里改了再点 Edit Externally 会重新导出\n\n"
+                "  - 在编辑器里改并保�?�?插件 0.3 秒内读回 Blender 并推给画布\n"
+                "  - Blender 里改了再�?Edit Externally 会重新导出\n\n"
                 "VS Code 建议装扩展：\n"
                 "  - ESLint（可选）\n"
-                "  - p5.vscode（自动补全 p5 API，作者 Sam Lavigne）\n\n"
-                "注意：Blender 内置文本编辑器只有 Python 着色规则，想要真正的 JS 高亮就用这里。\n"
+                "  - p5.vscode（自动补�?p5 API，作�?Sam Lavigne）\n\n"
+                "注意：Blender 内置文本编辑器只�?Python 着色规则，想要真正�?JS 高亮就用这里。\n"
             )
 
 
@@ -984,7 +965,7 @@ class P5B_OT_external_edit(bpy.types.Operator):
         except OSError as exc:
             self.report({"ERROR"}, f"could not open editor: {exc}")
             return {"CANCELLED"}
-        self.report({"INFO"}, f"editing {path} — save the file to sync")
+        self.report({"INFO"}, f"editing {path} �?save the file to sync")
         return {"FINISHED"}
 
 
@@ -1007,8 +988,7 @@ class P5B_OT_run_sketch(bpy.types.Operator):
         if ver == 0:
             self.report({"ERROR"}, _state["error"] or "no sketch text")
             return {"CANCELLED"}
-        # 没有画布客户端就顺手开一个后台的（用户点 Run 的预期是"立刻看到"）
-        if not host_status()["alive"] and rec is not None:
+        # 没有画布客户端就顺手开一个后台的（用户点 Run 的预期是"立刻看到"�?        if not host_status()["alive"] and rec is not None:
             launch_host("headless", int(rec.port))
         connected = bool(rt and rt["server"] and rt["server"].connected)
         self.report({"INFO"}, f"sketch v{ver} on {(rec.name if rec else '?')} "
@@ -1054,8 +1034,7 @@ class P5B_OT_standardize_plane(bpy.types.Operator):
         plane.location = (0.0, 0.0, 0.0)
         plane.rotation_euler = (0.0, 0.0, 0.0)
         plane.scale = (1.0, 1.0, 1.0)
-        # 网格本身也拉回 2x2（原位顶点，顶点数据不动 uv）
-        me = plane.data
+        # 网格本身也拉�?2x2（原位顶点，顶点数据不动 uv�?        me = plane.data
         if len(me.vertices) >= 4:
             plane.data.vertices.foreach_set("co", [
                 -1.0, -1.0, 0.0,
@@ -1101,8 +1080,7 @@ class P5B_OT_reset_material(bpy.types.Operator):
             self.report({"ERROR"}, "start the instance first")
             return {"CANCELLED"}
         name = (rec.material or f"P5B_Canvas_{rec.name}")
-        # 就地重建节点（不删数据块，避免把正在用它的物体留空槽）
-        mat = window.build_material(rt["live"].image, name, force=True)
+        # 就地重建节点（不删数据块，避免把正在用它的物体留空槽�?        mat = window.build_material(rt["live"].image, name, force=True)
         plane = bpy.data.objects.get(rec.plane) if rec.plane else None
         if plane is not None:
             if not plane.data.materials:
@@ -1110,6 +1088,24 @@ class P5B_OT_reset_material(bpy.types.Operator):
             else:
                 plane.data.materials[0] = mat
         self.report({"INFO"}, f"rebuilt {mat.name}")
+        return {"FINISHED"}
+
+
+class P5B_OT_feedback(bpy.types.Operator):
+    bl_idname = "p5b.feedback"
+    bl_label = "自身画布作纹�?
+    bl_description = (
+        "把当前实例的画布回传给它�?sketch 当上游纹理（视频反馈：拖影、万花筒）\n"
+        "不是撤销/返回。等价于在上面的「纹理」里选中 P5B_live_<实例�?"
+    )
+
+    def execute(self, context):
+        rec = active_record()
+        if rec is None:
+            self.report({"ERROR"}, "没有实例")
+            return {"CANCELLED"}
+        rec.texture = rec.image
+        self.report({"INFO"}, f"纹理 �?{rec.texture}（{rec.name}�?)
         return {"FINISHED"}
 
 
@@ -1252,7 +1248,7 @@ class P5B_OT_render_animation(bpy.types.Operator):
         rt = _runtime(rec.name) if rec is not None else None
         srv = rt["server"] if rt else None
         if srv is None or not srv.connected:
-            self.report({"ERROR"}, "host not connected — start the receiver and the canvas first")
+            self.report({"ERROR"}, "host not connected �?start the receiver and the canvas first")
             return {"CANCELLED"}
         start, end, step = sc.frame_start, sc.frame_end, max(sc.frame_step, 1)
         frames = list(range(start, end + 1, step))
@@ -1415,7 +1411,7 @@ class P5B_OT_instance_remove(bpy.types.Operator):
 def _draw_status_and_start(layout):
     st = stats_snapshot()
     if st["connected"] and st["fps"] > 0.5:
-        text, icon = f"live — {st['fps']} fps", "CHECKMARK"
+        text, icon = f"live �?{st['fps']} fps", "CHECKMARK"
     elif st["connected"]:
         text, icon = "connected, waiting for frames", "TIME"
     elif st["running"]:
@@ -1435,7 +1431,7 @@ def _draw_status_and_start(layout):
 
 
 class P5B_MT_menu(bpy.types.Menu):
-    """Always-visible entry point: 3D View header → p5inBlender."""
+    """Always-visible entry point: 3D View header �?p5inBlender."""
 
     bl_idname = "P5B_MT_menu"
     bl_label = "p5inBlender"
@@ -1490,7 +1486,9 @@ class P5B_PT_canvas(bpy.types.Panel):
         layout.prop(context.scene, "p5b_show_hud", text="Show Live Info")
         rec = active_record()
         if rec is not None:
-            layout.prop_search(rec, "texture", bpy.data, "images", text="Texture")
+            layout.prop_search(rec, "texture", bpy.data, "images", text="纹理")
+            row = layout.row(align=True)
+            row.operator("p5b.feedback", text="自身画布作纹�?, icon=_icon("LOOP_BACK"))
 
         row = layout.row(align=True)
         op = row.operator("p5b.open_host", text="Open", icon=_icon("WINDOW"))
@@ -1531,7 +1529,7 @@ class P5B_PT_sketch(bpy.types.Panel):
         row.operator("p5b.external_edit", text="Edit Externally", icon=_icon("TEXT"))
         row.operator("p5b.reset_sketch", text="Reset Demo", icon=_icon("FILE_REFRESH"))
         layout.prop(context.scene, "p5b_auto_run", text="Auto Run on Edit")
-        layout.label(text=f"v{st['sketch_version']} · {st['frames']} frames · {st['dropped']} dropped")
+        layout.label(text=f"v{st['sketch_version']} · {st['frames']} �?· �?{st['dropped']} · 旧连接帧 {st['stale_frames']}")
 
 
 class P5B_PT_tracking(bpy.types.Panel):
@@ -1593,7 +1591,7 @@ class P5B_PT_instances(bpy.types.Panel):
         layout = self.layout
         layout.operator("p5b.instance_new", text="New Instance", icon=_icon("ADD"))
         if not st["instances"]:
-            layout.label(text="no instance yet — press Start")
+            layout.label(text="no instance yet �?press Start")
         for i, row in enumerate(st["instances"]):
             line = layout.row(align=True)
             op = line.operator("p5b.instance_activate", text=row["name"], emboss=False,
@@ -1630,7 +1628,7 @@ classes = (
     P5B_OT_external_edit,
     P5B_OT_open_host, P5B_OT_close_host,
     P5B_OT_create_window, P5B_OT_show_canvas, P5B_OT_track, P5B_OT_untrack,
-    P5B_OT_bind_plane, P5B_OT_mark_geo, P5B_OT_unmark_geo, P5B_OT_reset_material,
+    P5B_OT_bind_plane, P5B_OT_feedback, P5B_OT_mark_geo, P5B_OT_unmark_geo, P5B_OT_reset_material,
     P5B_OT_standardize_plane,
     P5B_OT_cook_still, P5B_OT_cook_render, P5B_OT_render_animation,
     P5B_OT_instance_new, P5B_OT_instance_activate, P5B_OT_instance_start,
@@ -1650,7 +1648,7 @@ def _draw_header_menu(self, context):
 
 
 def _guard_panel_draws(classes):
-    """面板 draw 里任何异常都不该让整个侧栏闪烁/空白：捕获后画成一行红字。"""
+    """面板 draw 里任何异常都不该让整个侧栏闪�?空白：捕获后画成一行红字�?""
     def wrap(fn):
         def safe(self, context):
             try:
