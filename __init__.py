@@ -29,7 +29,7 @@ from . import live_image, transport, window
 bl_info = {
     "name": "p5inBlender",
     "author": "DeepseekWorkzone",
-    "version": (0, 15, 1),
+    "version": (0, 16, 0),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > p5inBlender",
     "description": "Live 2D canvas as a UV-mapped texture, coded in Blender's text editor",
@@ -935,7 +935,7 @@ class P5B_OT_create_window(bpy.types.Operator):
                 return {"CANCELLED"}
             rt = _runtime(active_record().name)
         ob = window.create_window_plane()
-        window.bind_window(ob, rt["live"].image)
+        window.bind_window(ob, rt["live"].image, rec.material or "P5B_Canvas")
         for o in context.selected_objects:
             o.select_set(False)
         ob.select_set(True)
@@ -961,6 +961,30 @@ class P5B_OT_show_canvas(bpy.types.Operator):
         space = area.spaces.active
         space.image = rt["live"].image
         space.ui_mode = "VIEW"
+        return {"FINISHED"}
+
+
+class P5B_OT_reset_material(bpy.types.Operator):
+    bl_idname = "p5b.reset_material"
+    bl_label = "Reset Material"
+    bl_description = "Rebuild the canvas material with the default node setup (overwrites manual edits)"
+
+    def execute(self, context):
+        rec = active_record()
+        rt = _runtime(rec.name) if rec is not None else None
+        if rt is None or rt["live"] is None:
+            self.report({"ERROR"}, "start the instance first")
+            return {"CANCELLED"}
+        name = (rec.material or f"P5B_Canvas_{rec.name}")
+        # 就地重建节点（不删数据块，避免把正在用它的物体留空槽）
+        mat = window.build_material(rt["live"].image, name, force=True)
+        plane = bpy.data.objects.get(rec.plane) if rec.plane else None
+        if plane is not None:
+            if not plane.data.materials:
+                plane.data.materials.append(mat)
+            else:
+                plane.data.materials[0] = mat
+        self.report({"INFO"}, f"rebuilt {mat.name}")
         return {"FINISHED"}
 
 
@@ -1298,9 +1322,6 @@ def _draw_status_and_start(layout):
     row.scale_y = 1.4
     row.operator("p5b.start", text="Start", icon="PLAY")
     row.operator("p5b.stop", text="Stop", icon="SNAP_FACE")
-    row = layout.row(align=True)
-    row.operator("p5b.new_sketch", text="Edit Sketch", icon="TEXT")
-    row.operator("p5b.run_sketch", text="Run", icon="SCRIPTPLUGINS")
 
 
 class P5B_MT_menu(bpy.types.Menu):
@@ -1318,15 +1339,10 @@ class P5B_MT_menu(bpy.types.Menu):
         layout.operator("p5b.start", text="Start (background)", icon="PLAY")
         layout.operator("p5b.stop", text="Stop", icon="SNAP_FACE")
         layout.separator()
-        op = layout.operator("p5b.open_host", text="Open Canvas Window", icon="WINDOW")
-        op.mode = "window"
-        layout.operator("p5b.close_host", text="Close Canvas", icon="X")
-        layout.separator()
+        layout.operator("p5b.new_sketch", text="Edit Sketch", icon="TEXT")
         layout.operator("p5b.run_sketch", text="Run Sketch", icon="SCRIPTPLUGINS")
-        layout.operator("p5b.new_sketch", text="New Sketch", icon="TEXT")
         layout.separator()
         layout.operator("p5b.show_canvas", text="Show Live Canvas", icon="IMAGE_DATA")
-        layout.operator("p5b.create_window", text="Create UV Window", icon="MESH_PLANE")
 
 
 class P5B_PT_panel(bpy.types.Panel):
@@ -1357,7 +1373,9 @@ class P5B_PT_canvas(bpy.types.Panel):
         row = layout.row(align=True)
         row.operator("p5b.show_canvas", text="Show", icon="IMAGE_DATA")
         row.operator("p5b.create_window", text="Window Plane", icon="MESH_PLANE")
-        layout.operator("p5b.bind_plane", text="Bind Selected Mesh", icon="LINKED")
+        row = layout.row(align=True)
+        row.operator("p5b.bind_plane", text="Bind Mesh", icon="LINKED")
+        row.operator("p5b.reset_material", text="Reset Material", icon="FILE_REFRESH")
         rec = active_record()
         if rec is not None:
             layout.prop_search(rec, "texture", bpy.data, "images", text="Texture")
@@ -1392,15 +1410,17 @@ class P5B_PT_sketch(bpy.types.Panel):
         rec = active_record()
         layout = self.layout
         row = layout.row(align=True)
+        row.scale_y = 1.2
         row.operator("p5b.run_sketch", text="Run", icon="PLAY")
         row.operator("p5b.new_sketch", text="Edit", icon="TEXT")
         if rec is not None:
             layout.prop_search(rec, "text", bpy.data, "texts", text="Sketch")
             if bpy.data.texts.get(rec.text) is None:
                 layout.label(text=f"missing text: {rec.text}", icon="ERROR")
-        layout.operator("p5b.external_edit", icon="TEXT")
+        row = layout.row(align=True)
+        row.operator("p5b.external_edit", text="Edit Externally", icon="TEXT")
+        row.operator("p5b.reset_sketch", text="Reset Demo", icon="FILE_REFRESH")
         layout.prop(context.scene, "p5b_auto_run", text="Auto Run on Edit")
-        layout.operator("p5b.reset_sketch", icon="FILE_REFRESH")
         layout.label(text=f"v{st['sketch_version']} · {st['frames']} frames · {st['dropped']} dropped")
 
 
@@ -1483,9 +1503,7 @@ class P5B_PT_text_sidebar(bpy.types.Panel):
     def draw(self, context):
         st = stats_snapshot()
         layout = self.layout
-        row = layout.row(align=True)
-        row.operator("p5b.run_sketch", text="Run", icon="PLAY")
-        row.operator("p5b.new_sketch", text="New", icon="TEXT")
+        layout.operator("p5b.run_sketch", text="Run", icon="PLAY")
         layout.label(text=f"{'live' if st['connected'] else 'off'} · v{st['sketch_version']} · {st['fps']} fps")
 
 
@@ -1495,7 +1513,7 @@ classes = (
     P5B_OT_external_edit,
     P5B_OT_open_host, P5B_OT_close_host,
     P5B_OT_create_window, P5B_OT_show_canvas, P5B_OT_track, P5B_OT_untrack,
-    P5B_OT_bind_plane, P5B_OT_feedback, P5B_OT_mark_geo, P5B_OT_unmark_geo,
+    P5B_OT_bind_plane, P5B_OT_feedback, P5B_OT_mark_geo, P5B_OT_unmark_geo, P5B_OT_reset_material,
     P5B_OT_cook_still, P5B_OT_cook_render, P5B_OT_render_animation,
     P5B_OT_instance_new, P5B_OT_instance_activate, P5B_OT_instance_start,
     P5B_OT_instance_stop, P5B_OT_instance_remove,

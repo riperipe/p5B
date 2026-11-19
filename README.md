@@ -226,6 +226,26 @@ sketch 顶部可以声明两件事：
 一步到位看到效果：选中一个空物体 → `Tracking` → `Track Selected`；
 选中一个网格 → `Tracking` → `Send Geometry`；然后 `Run`。
 
+## 默认材质（v0.16 起）
+
+`Create UV Window` / `New Instance` 建出来的材质结构：
+
+```
+UV Map ─ Mapping ─ Image Texture ─┬─ Color ───────────── Base Color ─┐
+                                  │                     Emission Color │
+                                  │                                  Principled ─ Output
+                                  └─ Alpha ─ P5B Alpha Ramp ─ Alpha ─┘
+
+（旁边还有一个未连线的 P5B Color Ramp，想做套色时把它插进颜色路径）
+```
+
+- **颜色默认直通**：ColorRamp 会把 RGB 压成灰度，所以默认**不**串在链路上；
+  节点已经摆好，想做双色调/套色就把 `Image.Color` 接到它、再接到 `Base Color`
+- **Alpha 已经接好**：`Image.Alpha → P5B Alpha Ramp → Principled.Alpha`，
+  材质混合模式设为 `BLENDED`，画布透明的地方在 Blender 里也是透明的
+- **自发光**：Base/Emission 都吃同一张图，场景没打灯也能看清画布
+- 调乱了？`Canvas` 面板 → **`Reset Material`** 就地重建默认节点（不会删数据块）
+
 ## 语法高亮：为什么 Blender 里没法做，插件给的是什么
 
 先说结论：**Blender 内置文本编辑器没法装语言包。** 它的着色器是 C 里写死的
@@ -347,21 +367,28 @@ if (tex) p.drawingContext.drawImage(tex, 0, 0, p.width, p.height);
 
 ### N 面板结构
 
-侧栏分类 `p5inBlender` 下**只有一层子层级**：五个平级面板，彼此没有父子关系，
-每个面板内部只放「一行按钮 / 一行标签」，不再嵌套 box 或子面板。
+侧栏分类 `p5inBlender` 下**只有一层子层级**：平级面板，每个面板内部只放「一行按钮 / 一行标签」。
 
 ```
-p5inBlender  状态行 + Start / Stop          （默认展开）
-Canvas       Show / Window Plane            （默认折叠）
-             Open / Background / Close
-             端口 W H · 地址
-Sketch       Run / New · 版本与帧数          （默认折叠）
-Tracking     Track Selected / Untrack · 数量 （默认折叠）
-Render       Cook / Cook + Render           （默认折叠）
-             Render Animation · cook 次数
+p5inBlender   状态行 + Start / Stop                 ← 只管开关
+Canvas        Show / Window Plane
+              Bind Mesh / Reset Material
+              Open / Background / Close（浏览器）
+              Texture 下拉 + Feedback
+              端口 W H
+Sketch        Run / Edit
+              Sketch 下拉（选 Text datablock）
+              Edit Externally / Reset Demo
+              Auto Run on Edit
+Tracking      Track / Untrack · Send Geometry
+Render        Cook / Cook + Render · Render Animation
+Instances     New Instance + 每个实例一行（激活/启动/停止/删除）
 ```
 
-Text Editor 侧栏另有一个精简版：Run / New + 状态，同样只有一层。
+同一个动作只在一个地方出现：`Run` / `Edit` 只在 `Sketch` 面板；`Start` / `Stop` 只在
+主面板。顶栏菜单和 Text Editor 侧栏是**快捷入口**（`Run` 在写代码时最顺手，刻意保留一份）。
+
+Text Editor 侧栏：`Run` + 状态，只有这一行。
 
 ## 渲染动画（逐帧确定性出片）
 
