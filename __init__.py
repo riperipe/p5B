@@ -29,7 +29,7 @@ from . import live_image, transport, window
 bl_info = {
     "name": "p5inBlender",
     "author": "DeepseekWorkzone",
-    "version": (0, 20, 6),
+    "version": (0, 20, 7),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > p5inBlender",
     "description": "Live 2D canvas as a UV-mapped texture, coded in Blender's text editor",
@@ -301,6 +301,25 @@ def _icon(name: str) -> str:
 
 
 _LAST_TAG = 0.0
+
+
+def _open_text_name():
+    """当前 Text Editor 里正在看的文本名（没有就返回 None）。"""
+    try:
+        for wm in bpy.data.window_managers:
+            for win in wm.windows:
+                for area in win.screen.areas:
+                    if area.type == "TEXT_EDITOR":
+                        sp = area.spaces.active
+                        if sp is not None and sp.text is not None:
+                            return sp.text.name
+    except Exception:
+        pass
+    return None
+
+
+def _looks_like_sketch(source: str) -> bool:
+    return ("createCanvas" in source) or ("function sketch(" in source) or ("@mode global" in source)
 
 
 def _tag_redraw(force: bool = False, hz: float = 16.0):
@@ -581,6 +600,24 @@ def _pump():
                     if packed is not None:
                         srv.publish_texture(*packed)
                         rt["tex_t"] = now
+
+        # 跟随编辑：你在 Text Editor 里改哪份、实例就切到哪份（只对 sketch 生效）
+        if (rec is not None and getattr(scene, "p5b_auto_run", True)
+                and getattr(scene, "p5b_follow_edit", True)):
+            open_name = _open_text_name()
+            if open_name and open_name != rec.text:
+                ot = bpy.data.texts.get(open_name)
+                if ot is not None and _looks_like_sketch(ot.as_string()):
+                    digest = hash(ot.as_string())
+                    if rt.get("follow_hash") is None:
+                        rt["follow_hash"] = digest
+                    elif digest != rt["follow_hash"]:
+                        rt["follow_hash"] = digest
+                        rec.text = open_name
+                        rt["src_hash"] = digest
+                        rt["pending_hash"] = None
+                        instance_push(rec)
+                        continue
 
         # auto-run: push a sketch again once its text stops changing
         if rec is not None and getattr(scene, "p5b_auto_run", True):
@@ -1566,6 +1603,10 @@ class P5B_PT_sketch(bpy.types.Panel):
             layout.prop_search(rec, "text", bpy.data, "texts", text="Sketch")
             if bpy.data.texts.get(rec.text) is None:
                 layout.label(text=f"missing text: {rec.text}", icon=_icon("ERROR"))
+            editing = _open_text_name()
+            if editing and editing != rec.text:
+                layout.label(text=f"编辑中：{editing}（不在运行）", icon=_icon("INFO"))
+        layout.prop(context.scene, "p5b_follow_edit", text="跟随编辑的文本")
         row = layout.row(align=True)
         row.operator("p5b.external_edit", text="Edit Externally", icon=_icon("TEXT"))
         row.operator("p5b.reset_sketch", text="Reset Demo", icon=_icon("FILE_REFRESH"))
@@ -1733,6 +1774,10 @@ def register():
         bpy.types.Scene.p5b_active = bpy.props.IntProperty(name="Active", default=0)
     if not hasattr(bpy.types.Scene, "p5b_auto_run"):
         bpy.types.Scene.p5b_auto_run = bpy.props.BoolProperty(name="Auto Run", default=True)
+    if not hasattr(bpy.types.Scene, "p5b_follow_edit"):
+        bpy.types.Scene.p5b_follow_edit = bpy.props.BoolProperty(
+            name="Follow Edited Text", default=True,
+            description="在文本编辑器里改哪份 sketch，就自动让实例跑哪份（避免改了别的文件没反应）")
     if not hasattr(bpy.types.Scene, "p5b_show_hud"):
         bpy.types.Scene.p5b_show_hud = bpy.props.BoolProperty(
             name="Show Live Info", default=True,
@@ -1761,6 +1806,6 @@ def unregister():
         except RuntimeError:
             pass
     for prop in ("p5b_port", "p5b_width", "p5b_height", "p5b_instances", "p5b_active",
-                 "p5b_auto_run", "p5b_show_hud"):
+                 "p5b_auto_run", "p5b_show_hud", "p5b_follow_edit"):
         if hasattr(bpy.types.Scene, prop):
             delattr(bpy.types.Scene, prop)
