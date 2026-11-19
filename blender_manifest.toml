@@ -6,7 +6,7 @@ tagline = "Unofficial add-on: code p5.js in Blender, canvas as a UV texture"
 maintainer = "DeepseekWorkzone"
 type = "add-on"
 
-version = "0.22.3"
+version = "0.22.4"
 
 blender_version_min = "4.2.0"
 
@@ -14,6 +14,7 @@ license = ["SPDX:GPL-3.0-or-later"]
 
 [permissions]
 network = "Loopback socket on 127.0.0.1 to stream canvas frames"
+files = "Write sketch files and a temporary browser profile"
 
 [urls]
 documentation = "https://github.com/riperipe/p5B#readme"

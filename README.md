@@ -9,11 +9,22 @@ window opens on your model.
 
 [中文说明](README.zh.md) · [Download](../../releases/latest) · [Third-party notices](THIRD-PARTY.md)
 
-![glitch sketch running on p5 2.4](docs/demo_glitch.png)
+![glitch sketch running on p5 2.4](docs/demo_glitch.jpg)
+
+## Requirements
+
+- **Blender 4.2 or newer** (extensions platform). Tested on Blender 5.1.
+- **A Chromium-family browser** — Chrome, Edge or Chromium — installed normally.
+  A real browser is the sketch runtime; Blender's own Python has no web engine.
+- Online access allowed in Blender (`Preferences → System → Allow Online Access`)
+  if you use `// @p5 2`, which pulls the compatibility add-ons from a CDN.
+  Plain p5 1.x sketches and everything bundled run fully offline.
+- Platform status: **Windows verified**; the macOS and Linux code paths exist but
+  are untested. Please open an issue with your Blender version if you try them.
 
 ## Download and install
 
-1. **[Download the latest release](../../releases/latest)** → pick `p5B-<version>.zip`
+1. **[Download the latest release](../../releases/latest)** → pick `p5b-<version>.zip`
    (do not unzip it).
 2. Blender 4.2+ → `Edit → Preferences → Get Extensions → Install from Disk…`.
 3. Enable **p5B**, then open the 3D View sidebar with `N` → `p5B`.
@@ -155,5 +166,7 @@ cook round-trip 10–52 ms, image upload 0.69 ms (640×360).
 
 ## Licence
 
-GPL-3.0-or-later — see [LICENSE](LICENSE). Bundled third-party code (p5.js 1.11.3 and
-2.4.0, MIT) is listed in [THIRD-PARTY.md](THIRD-PARTY.md).
+GPL-3.0-or-later — see [LICENSE](LICENSE). The two bundled p5.js builds
+(1.11.3 and 2.4.0) are **LGPL-2.1**, not MIT: their notice and the full licence
+text ship in [host/libs/LICENSE-p5.txt](host/libs/LICENSE-p5.txt), and the
+details are in [THIRD-PARTY.md](THIRD-PARTY.md).

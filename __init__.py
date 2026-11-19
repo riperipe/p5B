@@ -32,7 +32,7 @@ _t = _i18n.t
 bl_info = {
     "name": "p5B",
     "author": "DeepseekWorkzone",
-    "version": (0, 22, 3),
+    "version": (0, 22, 4),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > p5B",
     "description": "Live 2D canvas as a UV-mapped texture, coded in Blender's text editor",
@@ -855,6 +855,27 @@ def cook_frame(frame: int | None = None, timeout: float = 5.0) -> int:
     _tag_redraw()
     return target
 
+
+# ------------------------------------------------- online access (extension policy)
+def online_access_ok() -> bool:
+    """Blender 4.2+ exposes bpy.app.online_access; older builds have no switch."""
+    return bool(getattr(bpy.app, "online_access", True))
+
+
+def require_online_access(operator) -> bool:
+    """Extensions that declare the network permission must honour this switch.
+
+    The socket is loopback-only, but Blender's policy applies to all sockets, so
+    starting the receiver or the browser host is refused while access is off.
+    """
+    if online_access_ok():
+        return True
+    operator.report({"ERROR"},
+                    "Online access is disabled: Preferences > System > Allow Online Access "
+                    "(or start Blender with --online-mode), then try again")
+    return False
+
+
 # --------------------------------------------------------------------- operators
 class P5B_OT_start(bpy.types.Operator):
     bl_idname = "p5b.start"
@@ -863,6 +884,8 @@ class P5B_OT_start(bpy.types.Operator):
                       "If it is already running this simply re-runs the current sketch")
 
     def execute(self, context):
+        if not require_online_access(self):
+            return {"CANCELLED"}
         sc = context.scene
         port = int(sc.p5b_port)
         if not start_bridge(port, int(sc.p5b_width), int(sc.p5b_height)):
@@ -1282,6 +1305,8 @@ class P5B_OT_open_host(bpy.types.Operator):
     )
 
     def execute(self, context):
+        if not require_online_access(self):
+            return {"CANCELLED"}
         sc = context.scene
         rec = active_record()
         rt = _runtime(rec.name) if rec is not None else None
@@ -1436,6 +1461,8 @@ class P5B_OT_instance_start(bpy.types.Operator):
     name: bpy.props.StringProperty()
 
     def execute(self, context):
+        if not require_online_access(self):
+            return {"CANCELLED"}
         rec = instance_record(self.name) or active_record()
         if rec is None:
             return {"CANCELLED"}
