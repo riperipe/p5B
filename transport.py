@@ -527,6 +527,8 @@ class FrameServer:
                     self._state_event.set()
                 elif msg.get("type") == "texture_ack":
                     self.stats["tex_acks"] = self.stats.get("tex_acks", 0) + 1
+                elif msg.get("type") == "sketch_error":
+                    self.error = ("sketch: " + str(msg.get("msg", "")))[:300]
                 continue
             if opcode not in (0x2, 0x0):
                 continue

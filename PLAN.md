@@ -72,6 +72,13 @@
 - [x] `// @mode global`：p5 + sketch 放进同源 iframe，老 sketch 免改造
 - [x] 实测 p5.riso：网点 + 线框双色印，56.9 fps（缓存网点前只有 8 fps）
 
+**M5.6 WEBGL 与排错** ✅
+- [x] WEBGL 画布经 2D 暂存画布回读（直接 `getContext('2d')` 会返回 null）
+- [x] 全局模式自动识别（没有 `function sketch(` 但有 `function setup(` 就走 iframe）
+- [x] iframe 里的 `onerror` / `console.error` 回传到 Blender 面板
+- [x] `Sketch` 面板可下拉切换实例用哪份 Text datablock
+- [x] 实测：800×800 WEBGL glitch shader sketch 正常出图（41.9 fps）
+
 **M6 — 平台与分发**（macOS 暂缓，用户明确说不急）
 - macOS 适配（自备 Chromium，不用 WKWebView）
 - 打包：blender_manifest + 可选 Spout/Syphon 加速通道

@@ -93,9 +93,18 @@ p5inBlender.cook_frame(90)      # 让浏览器渲染第 90 帧 → 等回来 →
 **7. 端口是场景属性，不是常量。** 面板里改过端口后，接收端和浏览器都会跟着变；
 如果手动打开 `127.0.0.1:9877` 而属性已经变成别的值，就会连不上。看面板 `Canvas` 里那一行地址。
 
-**8. 内联 `<script>` 里不能出现字面量 `</script>`。** 用 iframe 跑全局模式时需要拼 HTML 字符串，
-写了 `'</script>'` 会让 HTML 解析器提前结束外层脚本，页面直接 `Unexpected end of input`。
-写成 `'<\/script>'` 就好（Node 的 `--check` 检测不到这个，只有浏览器会炸）。
+**9. WEBGL 画布不能直接 `getImageData`。** 对 WebGL canvas 调 `getContext('2d')` 返回 `null`，
+会直接把发送循环打断（页面上表现为 fps=0）。现在统一先 `drawImage` 到一个 2D 暂存画布再读；
+全局模式下每帧用 `redraw()` 同步重绘一次、紧接着 blit（WebGL 的 drawing buffer 只在本次调用内有效）。
+**实测**：一个旋转立方体的 WEBGL sketch 能正常出图；p5.riso 这类 2D 库也一样。
+
+**10. p5 的 `get()` 在 WEBGL 下拿不到可靠像素。** 复制来的 shader sketch 常见写法是
+`shader(s); rect(...); tex = get(0,0,width,height);` —— 在 WEBGL 里 `tex` 往往是空的，
+后面所有采样都变成黑色，看起来就是"跑不动"。正确做法是把第一趟渲染画进一个
+`createGraphics(w, h, WEBGL)`，直接把它当纹理用。
+
+**11. 全局模式的报错会转发到 Blender 面板。** iframe 里 `window.onerror` / `console.error`
+的内容会通过 `{"type":"sketch_error"}` 回传，显示在 N 面板状态行下面；查"为什么跑不动"先看那行字。
 
 ## 安装 / 更新
 

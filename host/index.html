@@ -36,6 +36,7 @@ let ws = null;
 let p5Ready = false;
 let p5Instance = null;
 let iframe = null;           // global-mode sketches run inside an iframe
+let iframeCanvas = null;     // 2D scratch holding the iframe's latest frame
 let sketchMode = 'instance';
 let pendingSketch = null;
 let placeholder = null;      // canvas used when p5 is unavailable
@@ -119,6 +120,7 @@ function connect() {
       pushStateToSketch(msg.t || 0);
       if (iframe) {
         try { iframe.contentWindow.redraw && iframe.contentWindow.redraw(); } catch (e) { /* ignore */ }
+        captureFromIframe();
         sendFrame(msg.id, activeCanvas());
       } else if (p5Instance) {
         try { p5Instance.redraw(); } catch (e) { console.error(e); }
@@ -137,9 +139,24 @@ function connect() {
 }
 
 // v2 帧：header + plane 表 + 负载
+// 源画布可能是 WebGL（getContext('2d') 直接返回 null），统一先 blit 到 2D 暂存画布
+let scratch2d = null;
+
+function readable2d(cv) {
+  if (!scratch2d) scratch2d = document.createElement('canvas');
+  if (scratch2d.width !== cv.width) scratch2d.width = cv.width;
+  if (scratch2d.height !== cv.height) scratch2d.height = cv.height;
+  const ctx = scratch2d.getContext('2d', { willReadFrequently: true });
+  ctx.clearRect(0, 0, scratch2d.width, scratch2d.height);
+  try { ctx.drawImage(cv, 0, 0); } catch (e) { /* ignore */ }
+  return scratch2d;
+}
+
 function buildFrame(cv, seq, req) {
-  const ctx = cv.getContext('2d', { willReadFrequently: true });
-  const img = ctx.getImageData(0, 0, cv.width, cv.height);
+  const src = readable2d(cv);
+  const ctx = src.getContext('2d', { willReadFrequently: true });
+  const img = ctx.getImageData(0, 0, src.width, src.height);
+  cv = src;
   const planes = [{ name: 'rgba', channels: 4, data: new Uint8Array(img.data.buffer) }];
   const hdrLen = 24 + planes.length * 9;
   const total = planes.reduce((a, p) => a + p.data.length, 0);
@@ -245,15 +262,65 @@ function runGlobalSketch(source, libs) {
     if (!iframe) return;
     const win = iframe.contentWindow;
     if (!win || !win.p5) { setTimeout(boot, 60); return; }
+    // 把 iframe 里的报错转发出来（全局模式没有我们的 try/catch 包着）
+    try {
+      const relay = (msg) => {
+        const text = String(msg).slice(0, 300);
+        console.error('[sketch]', text);
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'sketch_error', msg: text }));
+        }
+      };
+      win.onerror = (m, s, l) => { relay(m + '  @line ' + l); return false; };
+      const origError = win.console.error;
+      win.console.error = function () {
+        relay(Array.prototype.slice.call(arguments).join(' '));
+        return origError.apply(win.console, arguments);
+      };
+    } catch (e) { /* ignore */ }
     const tag = iframe.contentDocument.createElement('script');
     tag.textContent = source;
     iframe.contentDocument.body.appendChild(tag);
+    wrapIframeDraw();
   };
   boot();
 }
 
+// WebGL 画布不能直接 getImageData；把 draw 包一层，在同一次调用里 blit 到 2D 画布
+function captureFromIframe() {
+  if (!iframe) return;
+  let cv = null;
+  try { cv = iframe.contentDocument.querySelector('canvas'); } catch (e) { return; }
+  if (!cv || !cv.width || !cv.height) return;
+  if (!iframeCanvas || iframeCanvas.width !== cv.width || iframeCanvas.height !== cv.height) {
+    iframeCanvas = document.createElement('canvas');
+    iframeCanvas.width = cv.width;
+    iframeCanvas.height = cv.height;
+  }
+  const ctx = iframeCanvas.getContext('2d', { willReadFrequently: true });
+  ctx.clearRect(0, 0, iframeCanvas.width, iframeCanvas.height);
+  try { ctx.drawImage(cv, 0, 0); } catch (e) { /* ignore */ }
+}
+
+function wrapIframeDraw() {
+  if (!iframe) return;
+  const win = iframe.contentWindow;
+  if (!win || typeof win.draw !== 'function' || win.__p5bWrapped) {
+    setTimeout(wrapIframeDraw, 120);
+    return;
+  }
+  win.__p5bWrapped = true;
+  const orig = win.draw;
+  win.draw = function () {
+    const r = orig.apply(this, arguments);
+    captureFromIframe();
+    return r;
+  };
+}
+
 function activeCanvas() {
   if (iframe) {
+    if (iframeCanvas && iframeCanvas.width) return iframeCanvas;
     try {
       const doc = iframe.contentDocument;
       if (doc) return doc.querySelector('canvas');
@@ -305,7 +372,8 @@ function loadSketch(source, ver) {
   }
   const libs = extractLibs(source);
   hud.libs.textContent = libs.length ? `libs: ${libs.length}` : 'libs: –';
-  const globalMode = /^\s*\/\/\s*@mode\s+global/m.test(source);
+  const globalMode = /^\s*\/\/\s*@mode\s+global/m.test(source) ||
+                     (!/function\s+sketch\s*\(/.test(source) && /function\s+setup\s*\(/.test(source));
   if (globalMode) {
     runGlobalSketch(source, libs);
     return;
@@ -343,12 +411,24 @@ function loadSketch(source, ver) {
 
 // ----------------------------------------------------------------- main loop
 function tick() {
-  const cv = activeCanvas();
-  if (cv) {
-    pushStateToSketch(lastState.t || 0);
-    sendFrame(0, cv);
+  requestAnimationFrame(tick);        // 先排下一帧：出错也不会把循环打断
+  try {
+    if (iframe) {
+      // 全局模式：同步重绘一帧，紧接着 blit（WebGL 缓冲只在本次调用内有效）
+      try {
+        const win = iframe.contentWindow;
+        if (win && typeof win.redraw === 'function') win.redraw();
+      } catch (e) { /* ignore */ }
+      captureFromIframe();
+    }
+    const cv = activeCanvas();
+    if (cv && cv.width) {
+      pushStateToSketch(lastState.t || 0);
+      sendFrame(0, cv);
+    }
+  } catch (err) {
+    console.error(err);
   }
-  requestAnimationFrame(tick);
 }
 
 // 浏览器被遮挡时 rAF 会停，用定时器兜底
@@ -362,6 +442,9 @@ requestAnimationFrame(tick);
 
 ensureP5().then(function (ok) {
   p5Ready = ok;
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'ready', p5: ok, ua: navigator.userAgent }));
+  }
   if (pendingSketch) {
     const s = pendingSketch;
     pendingSketch = null;
