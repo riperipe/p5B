@@ -171,6 +171,7 @@ class FrameServer:
         self._tls = threading.local()
         self._owner_client = None
         self._owner_conn = None
+        self._client_frames = {}
 
     # ---------------------------------------------------------------- lifecycle
     def start(self) -> bool:
@@ -595,18 +596,30 @@ class FrameServer:
         变成不停重连的风暴。这里只记录谁是当前写入者，其余连接的帧在 _push 里丢弃。
         """
         cid = getattr(self._tls, "cid", -1)
-        if self._owner_client is not None and self._owner_client != cid:
-            self.stats["superseded_clients"] = self.stats.get("superseded_clients", 0) + 1
+        if self._owner_client is None:
+            self._owner_client = cid
         self._owner_conn = conn
-        self._owner_client = cid
 
     def _push(self, seq: int, width: int, height: int, planes: dict) -> None:
-        # 只接受"当前客户端"的帧：浏览器重连时旧连接可能还在发，两路交替写入
-        # 同一张图，画面就会闪。最新的流媒体客户端拥有画布。
+        # 只接受"当前写入者"的帧：两个客户端同时写同一张图，画面会在两份内容之间
+        # 交替 → 闪烁。写入者是谁并不固定：用最近 1 秒谁供帧最多来选（快 1.5 倍才换），
+        # 这样后台被节流的标签页抢到所有权时能自动让位。
         cid = getattr(self._tls, "cid", -1)
+        now = time.time()
+        win = self._client_frames.setdefault(cid, [])
+        win.append(now)
+        while win and now - win[0] > 1.0:
+            win.pop(0)
+
         if self._owner_client is None:
             self._owner_client = cid
         elif cid != self._owner_client:
+            owner_rate = len(self._client_frames.get(self._owner_client, []))
+            if len(win) >= 5 and len(win) > owner_rate * 1.5:
+                self._owner_client = cid
+                self.stats["superseded_clients"] = self.stats.get("superseded_clients", 0) + 1
+
+        if cid != self._owner_client:
             self.stats["stale_frames"] = self.stats.get("stale_frames", 0) + 1
             return
         self.stats["frames"] += 1

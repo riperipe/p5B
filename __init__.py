@@ -29,7 +29,7 @@ from . import live_image, transport, window
 bl_info = {
     "name": "p5inBlender",
     "author": "DeepseekWorkzone",
-    "version": (0, 20, 4),
+    "version": (0, 20, 6),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > p5inBlender",
     "description": "Live 2D canvas as a UV-mapped texture, coded in Blender's text editor",
@@ -1118,17 +1118,29 @@ class P5B_OT_feedback(bpy.types.Operator):
     bl_idname = "p5b.feedback"
     bl_label = "自身画布作纹理"
     bl_description = (
-        "把当前实例的画布回传给它的 sketch 当上游纹理（视频反馈：拖影、万花筒）\n"
-        "不是撤销/返回。等价于在上面的「纹理」里选中 P5B_live_<实例名>"
+        "把当前实例的画布图像设为它的上游纹理，sketch 每 0.1 秒能读到上一帧"
+        "（视频反馈：拖影、万花筒、自相似）\n"
+        "不是撤销/返回。\n"
+        "效果等于在「纹理」下拉框里选中这个实例自己的画布图像——"
+        "图像名由实例决定（不一定是 P5B_live_ 开头），下拉框里现在就写着它的名字"
     )
+
+    @classmethod
+    def poll(cls, context):
+        rec = active_record()
+        return rec is not None and bool(rec.image)
 
     def execute(self, context):
         rec = active_record()
         if rec is None:
             self.report({"ERROR"}, "没有实例")
             return {"CANCELLED"}
-        rec.texture = rec.image
-        self.report({"INFO"}, f"纹理 ← {rec.texture}（{rec.name}）")
+        img = bpy.data.images.get(rec.image)
+        if img is None:
+            self.report({"ERROR"}, f"实例 {rec.name} 的画布图像不存在（{rec.image or '空'}）")
+            return {"CANCELLED"}
+        rec.texture = img.name
+        self.report({"INFO"}, f"{rec.name} 的纹理 ← {img.name}")
         return {"FINISHED"}
 
 
@@ -1512,6 +1524,12 @@ class P5B_PT_canvas(bpy.types.Panel):
             layout.prop_search(rec, "texture", bpy.data, "images", text="纹理")
             row = layout.row(align=True)
             row.operator("p5b.feedback", text="自身画布作纹理", icon=_icon("LOOP_BACK"))
+            target = bpy.data.images.get(rec.image)
+            layout.label(
+                text=(f"目标纹理：{target.name}" if target is not None
+                      else f"目标纹理：{rec.image or '（无）'}（未启动）"),
+                icon=_icon("IMAGE_DATA") if target is not None else _icon("ERROR"),
+            )
 
         row = layout.row(align=True)
         op = row.operator("p5b.open_host", text="Open", icon=_icon("WINDOW"))
