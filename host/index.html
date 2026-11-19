@@ -32,6 +32,16 @@ const mount = document.getElementById('mount');
 const $ = (id) => document.getElementById(id);
 const hud = { ws: $('ws'), p5: $('p5'), ver: $('ver'), libs: $('libs'), fps: $('fps'), objs: $('objs') };
 
+// 全局模式 iframe 里的报错（postMessage 转出来）
+window.addEventListener('message', (e) => {
+  if (!e.data || e.data.type !== 'p5b-error') return;
+  const text = String(e.data.msg || '').slice(0, 300);
+  console.error('[sketch]', text);
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'sketch_error', msg: text }));
+  }
+});
+
 let ws = null;
 let p5Ready = false;
 let p5Instance = null;
@@ -110,6 +120,12 @@ function connect() {
     else if (msg.type === 'state') {
       lastState = msg;
       hud.objs.textContent = `objects: ${(msg.objects || []).length}`;
+      // 实时信息总开关（N 面板 Canvas → Show Live Info）
+      const bar = document.getElementById('hud');
+      const hide = (msg.hud === false);
+      if (bar) bar.style.display = hide ? 'none' : 'flex';
+      if (hide !== hideHudBottom) hideHudBottom = hide;
+      if (hide) patchHudForActiveCanvas();
       // 实例的分辨率变了就跟着调整画布
       if (p5Instance && msg.w && msg.h &&
           (p5Instance.width !== msg.w || p5Instance.height !== msg.h)) {
@@ -119,7 +135,7 @@ function connect() {
       if (msg.state) lastState = msg.state;
       pushStateToSketch(msg.t || 0);
       if (iframe) {
-        try { iframe.contentWindow.redraw && iframe.contentWindow.redraw(); } catch (e) { /* ignore */ }
+        redrawIframe();
         captureFromIframe();
         sendFrame(msg.id, activeCanvas());
       } else if (p5Instance) {
@@ -225,6 +241,7 @@ function pushStateToSketch(t) {
     frame: lastState.frame || 0,
     w: lastState.w || (p5Instance ? p5Instance.width : 640),
     h: lastState.h || (p5Instance ? p5Instance.height : 360),
+    hud: lastState.hud !== false,
     texture: texCanvas,
   };
   if (iframe) { setGlobalState(payload); return; }
@@ -246,45 +263,51 @@ function destroySketch() {
   placeholder = null;
 }
 
-// 全局模式：把 p5 和 sketch 放进同源 iframe，让老 sketch 不用改就能跑
-function runGlobalSketch(source, libs) {
+// p5 1.x 特性补丁（p5 2.x 用；都是普通脚本，p5.registerAddon）
+const COMPAT_TAGS = ['preload', 'shapes', 'data', 'events'].map(function (n) {
+  return '<script src="https://cdn.jsdelivr.net/npm/p5.js-compatibility@0.2.0/src/' + n + '.js"><\/script>';
+}).join('');
+
+function sketchP5Major(source) {
+  const m = /^\s*\/\/\s*@p5\s+(\d+)/m.exec(source);
+  return m ? m[1] : '1';
+}
+
+// 全局模式：把 p5 和 sketch 放进同源 iframe，让老 sketch 不用改就能跑。
+// 关键：sketch 源码必须和 p5 写在同一个文档里（内联），p5 在 DOMContentLoaded
+// 时才会调用 setup()；如果等 p5 加载完再 append，它已经启动过了，永远不会建画布。
+function runGlobalSketch(source, libs, major) {
   sketchMode = 'global';
-  iframe = document.createElement('iframe');
-  iframe.style.cssText = 'width:100%;height:100%;border:0;background:#000';
-  mount.appendChild(iframe);
-  const doc = iframe.contentDocument;
+  major = major || '1';
+  const myFrame = document.createElement('iframe');
+  iframe = myFrame;
+  myFrame.style.cssText = 'width:100%;height:100%;border:0;background:#000';
+  mount.appendChild(myFrame);
+  const doc = myFrame.contentDocument;
   const libTags = libs.map((u) => '<script src="' + u + '"><\/script>').join('');
+  const safe = String(source).replace(/<\/script/gi, '<\\/script');
+  const core = major === '2' ? '/p5-2.min.js' : '/p5.min.js';
+  const compat = major === '2' ? COMPAT_TAGS : '';
+  const relay =
+    'window.onerror=function(m,s,l){try{parent.postMessage({type:"p5b-error",msg:String(m)+"  @line "+l},"*")}catch(e){}};' +
+    'var __ce=console.error;console.error=function(){try{parent.postMessage({type:"p5b-error",' +
+    'msg:Array.prototype.slice.call(arguments).join(" ")},"*")}catch(e){};return __ce.apply(console,arguments)};';
+  // 实例模式（function sketch(p)）也能塞进 iframe：把实例挂到 window.__p5bInst
+  const boot =
+    'if (typeof sketch === "function") { window.__p5bInst = new p5(sketch); }';
   doc.open();
   doc.write('<!doctype html><html><head><style>html,body{margin:0;overflow:hidden;background:#000}canvas{display:block}</style>' +
-            '<script src="https://cdn.jsdelivr.net/npm/p5@1.11.3/lib/p5.min.js"><\/script>' + libTags +
-            '</head><body></body></html>');
+            '<script>' + relay + '<\/script>' +
+            '<script src="' + core + '"><\/script>' + compat + libTags +
+            '</head><body><script>' + safe + '<\/script><script>' + boot + '<\/script></body></html>');
   doc.close();
-  const boot = () => {
-    if (!iframe) return;
-    const win = iframe.contentWindow;
-    if (!win || !win.p5) { setTimeout(boot, 60); return; }
-    // 把 iframe 里的报错转发出来（全局模式没有我们的 try/catch 包着）
-    try {
-      const relay = (msg) => {
-        const text = String(msg).slice(0, 300);
-        console.error('[sketch]', text);
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'sketch_error', msg: text }));
-        }
-      };
-      win.onerror = (m, s, l) => { relay(m + '  @line ' + l); return false; };
-      const origError = win.console.error;
-      win.console.error = function () {
-        relay(Array.prototype.slice.call(arguments).join(' '));
-        return origError.apply(win.console, arguments);
-      };
-    } catch (e) { /* ignore */ }
-    const tag = iframe.contentDocument.createElement('script');
-    tag.textContent = source;
-    iframe.contentDocument.body.appendChild(tag);
-    wrapIframeDraw();
+  const waitCanvas = () => {
+    if (iframe !== myFrame) return;
+    let cv = null;
+    try { cv = myFrame.contentDocument.querySelector('canvas'); } catch (e) { return; }
+    if (!cv) { setTimeout(waitCanvas, 50); return; }
   };
-  boot();
+  waitCanvas();
 }
 
 // WebGL 画布不能直接 getImageData；把 draw 包一层，在同一次调用里 blit 到 2D 画布
@@ -336,9 +359,22 @@ function globalState() {
   try { return iframe.contentWindow.p5inblender; } catch (e) { return null; }
 }
 
+function redrawIframe() {
+  if (!iframe) return;
+  try {
+    const win = iframe.contentWindow;
+    if (!win) return;
+    if (win.__p5bInst && typeof win.__p5bInst.redraw === 'function') win.__p5bInst.redraw();
+    else if (typeof win.redraw === 'function') win.redraw();
+  } catch (e) { /* ignore */ }
+}
+
 function setGlobalState(obj) {
   if (!iframe) return;
-  try { iframe.contentWindow.p5inblender = obj; } catch (e) { /* ignore */ }
+  try {
+    iframe.contentWindow.p5inblender = obj;
+    if (iframe.contentWindow.__p5bInst) iframe.contentWindow.__p5bInst.p5inblender = obj;
+  } catch (e) { /* ignore */ }
 }
 
 function makePlaceholder(w, h) {
@@ -373,10 +409,12 @@ function loadSketch(source, ver) {
   }
   const libs = extractLibs(source);
   hud.libs.textContent = libs.length ? `libs: ${libs.length}` : 'libs: –';
-  const globalMode = /^\s*\/\/\s*@mode\s+global/m.test(source) ||
+  const major = sketchP5Major(source);
+  const globalMode = major === '2' ||
+                     /^\s*\/\/\s*@mode\s+global/m.test(source) ||
                      (!/function\s+sketch\s*\(/.test(source) && /function\s+setup\s*\(/.test(source));
   if (globalMode) {
-    runGlobalSketch(source, libs);
+    runGlobalSketch(source, libs, major);
     return;
   }
   sketchMode = 'instance';
@@ -411,15 +449,75 @@ function loadSketch(source, ver) {
 }
 
 // ----------------------------------------------------------------- main loop
+// 实时信息开关：草图自己遵守 p5inblender.hud 是最干净的；
+// 但对"别人写的、没理这个开关"的草图，退一步在画布上把底部那条文字吃掉。
+let hideHudBottom = false;
+
+function hudBand(cv) { return Math.max(26, Math.round(cv.height * 0.085)); }
+
+function applyHudMask(cv) {
+  if (!cv || !cv.getContext) return;
+  let ctx = null;
+  try { ctx = cv.getContext('2d'); } catch (e) { return; }
+  if (!ctx || !ctx.fillText) return;   // WebGL 画布：拦不到文字，交给草图自己判断
+  if (ctx.__p5bFill) return;
+  ctx.__p5bFill = ctx.fillText.bind(ctx);
+  ctx.__p5bStroke = ctx.strokeText.bind(ctx);
+  window.__p5bPatched = (window.__p5bPatched || 0) + 1;
+  ctx.fillText = function (t, x, y) {
+    if (hideHudBottom && cv.height && y >= cv.height - hudBand(cv)) return;
+    return ctx.__p5bFill(t, x, y);
+  };
+  ctx.strokeText = function (t, x, y) {
+    if (hideHudBottom && cv.height && y >= cv.height - hudBand(cv)) return;
+    return ctx.__p5bStroke(t, x, y);
+  };
+}
+
+function patchHudForActiveCanvas() {
+  if (p5Instance && p5Instance.canvas) applyHudMask(p5Instance.canvas);
+  if (placeholder) applyHudMask(placeholder);
+  if (iframe) {
+    try {
+      const cv = iframe.contentDocument && iframe.contentDocument.querySelector('canvas');
+      if (cv) applyHudMask(cv);
+    } catch (e) { /* ignore */ }
+  }
+}
+
 function tick() {
   requestAnimationFrame(tick);        // 先排下一帧：出错也不会把循环打断
   try {
+    if (hideHudBottom) patchHudForActiveCanvas();
+    // 诊断：每秒把宿主状态报给 Blender（面板/日志能看出卡在哪）
+    if (performance.now() - (window.__p5bDbgT || 0) > 1000) {
+      window.__p5bDbgT = performance.now();
+      const cv = activeCanvas();
+      let extra = '';
+      if (iframe) {
+        try {
+          const w = iframe.contentWindow;
+          const d = iframe.contentDocument;
+          extra = ' ifr_p5=' + (w && w.p5 ? 1 : 0) +
+                  ' ifr_draw=' + (w ? typeof w.draw : '?') +
+                  ' ifr_doc=' + (d ? d.readyState : '?') +
+                  ' ifr_cv=' + (d && d.querySelector('canvas') ? 1 : 0);
+        } catch (e) { extra = ' ifr_err'; }
+      }
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'debug',
+          msg: 'mode=' + sketchMode + ' iframe=' + (iframe ? 1 : 0) +
+               ' canvas=' + (cv && cv.width ? cv.width + 'x' + cv.height : 'none') +
+               ' p5ready=' + (p5Ready ? 1 : 0) +
+               ' hudHidden=' + (hideHudBottom ? 1 : 0) +
+               ' patched=' + (window.__p5bPatched || 0) + extra,
+        }));
+      }
+    }
     if (iframe) {
       // 全局模式：同步重绘一帧，紧接着 blit（WebGL 缓冲只在本次调用内有效）
-      try {
-        const win = iframe.contentWindow;
-        if (win && typeof win.redraw === 'function') win.redraw();
-      } catch (e) { /* ignore */ }
+      redrawIframe();
       captureFromIframe();
     }
     const cv = activeCanvas();

@@ -276,6 +276,38 @@ UV Map ─ Mapping ─ Image Texture ─┬─ Color ─────────
 - **自发光**：Base/Emission 都吃同一张图，场景没打灯也能看清画布
 - 调乱了？`Canvas` 面板 → **`Reset Material`** 就地重建默认节点（不会删数据块）
 
+## p5 版本：1.x（默认）/ 2.x
+
+```js
+// @p5 2
+```
+
+写这一行，这个 sketch 就跑在 **p5 2.x** 上（插件内置 2.4.0，`host/libs/p5-2.min.js`），
+并自动加载 [p5.js-compatibility](https://github.com/processing/p5.js-compatibility) 的
+`preload / shapes / data / events` 四个补丁，让 1.x 的老写法继续可用。
+
+- 不写 `@p5` 就是 1.11.3（默认，内置、离线可用）
+- 2.x 的 sketch 一律跑在同源 iframe 里（写成 `function sketch(p)` 也可以，host 会自动 `new p5(sketch)`）
+- 补丁从 CDN 加载（LGPL-2.1，不打包进插件）
+- 实测：p5 **2.4.0** + `quadraticVertex`(shapes.js) + `append`(data.js)，59.7 fps
+
+## 实时信息开关（Show Live Info）
+
+`Canvas` 面板 → **`Show Live Info`**（默认开）。关掉之后：
+
+1. 浏览器页顶状态栏隐藏
+2. sketch 读到 `p5inblender.hud === false`（内置 demo / ConnectedParticles / InkPool 会自己收起 HUD）
+3. 对**没理这个开关**的第三方 sketch，还会兜底：把画布底部那条文字（`text()` 的基线落在底部
+   8.5% 区域）在绘制时吃掉——所以别人的代码也能立刻变干净
+
+自己写的 sketch 想干净地配合，就判断一下：
+
+```js
+if (window.p5inblender?.hud !== false) {
+  text('frame ' + frameCount, 12, height - 12);
+}
+```
+
 ## 语法高亮：为什么 Blender 里没法做，插件给的是什么
 
 先说结论：**Blender 内置文本编辑器没法装语言包。** 它的着色器是 C 里写死的
@@ -404,6 +436,7 @@ p5inBlender   状态行 + Start / Stop                 ← 只管开关
 Canvas        Show / Window Plane
               Bind Mesh / Reset Material
               Standardize Canvas (2x2 on XY)
+              Show Live Info（实时信息开关）
               Open / Background / Close（浏览器）
               Texture 下拉 + Feedback
               端口 W H

@@ -100,15 +100,17 @@ function sketch(p) {
       p.text(o.name, x + 22, y - 16);
     });
 
-    // 5) HUD
-    p.noStroke();
-    p.fill(200, 230, 255, 190);
-    p.textSize(11);
-    p.text('frame ' + (state.frame || 0) +
-           '   t=' + (D.t || 0).toFixed(2) + 's' +
-           '   tracked ' + objs.length +
-           '   geo ' + geo.length +
-           '   ' + p.width + 'x' + p.height +
-           (tex ? '   tex' : ''), 12, p.height - 12);
+    // 5) HUD（Canvas → Show Live Info 控制，读 p5inblender.hud）
+    if (D.hud !== false) {
+      p.noStroke();
+      p.fill(200, 230, 255, 190);
+      p.textSize(11);
+      p.text('frame ' + (state.frame || 0) +
+             '   t=' + (D.t || 0).toFixed(2) + 's' +
+             '   tracked ' + objs.length +
+             '   geo ' + geo.length +
+             '   ' + p.width + 'x' + p.height +
+             (tex ? '   tex' : ''), 12, p.height - 12);
+    }
   };
 }

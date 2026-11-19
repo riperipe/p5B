@@ -345,7 +345,19 @@ class FrameServer:
         elif path == "/sketch.js":
             self._send_http(conn, 200, "text/javascript; charset=utf-8", self.sketch_source.encode("utf-8"))
         elif path == "/p5.min.js":
-            self._send_file(conn, os.path.join(ADDON_DIR, "host", "p5.min.js"), "text/javascript; charset=utf-8")
+            # vendored copy (host/libs/p5.min.js) first, so reloads never touch the network
+            for rel in (("host", "libs", "p5.min.js"), ("host", "p5.min.js")):
+                full = os.path.join(ADDON_DIR, *rel)
+                if os.path.exists(full):
+                    self._send_file(conn, full, "text/javascript; charset=utf-8")
+                    return
+            self._send_http(conn, 404, "text/plain", b"p5.min.js not vendored")
+        elif path == "/p5-2.min.js":
+            full = os.path.join(ADDON_DIR, "host", "libs", "p5-2.min.js")
+            if os.path.exists(full):
+                self._send_file(conn, full, "text/javascript; charset=utf-8")
+            else:
+                self._send_http(conn, 404, "text/plain", b"p5 2.x not vendored")
         elif path.startswith("/libs/"):
             name = os.path.basename(path)
             self._send_file(conn, os.path.join(ADDON_DIR, "host", "libs", name),
@@ -529,6 +541,8 @@ class FrameServer:
                     self.stats["tex_acks"] = self.stats.get("tex_acks", 0) + 1
                 elif msg.get("type") == "sketch_error":
                     self.error = ("sketch: " + str(msg.get("msg", "")))[:300]
+                elif msg.get("type") == "debug":
+                    self.stats["debug"] = str(msg.get("msg", ""))[:200]
                 continue
             if opcode not in (0x2, 0x0):
                 continue

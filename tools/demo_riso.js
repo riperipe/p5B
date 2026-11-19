@@ -71,11 +71,13 @@ function draw() {
 
   drawRiso();
 
-  noStroke();
-  fill(40, 40, 46, 210);
-  textSize(11);
-  text('p5.riso  ·  frame ' + (st.frame || 0) +
-       '  ·  tracked ' + ((st.objects || []).length) +
-       '  ·  geo ' + ((st.geo || []).length) +
-       '  ·  ' + width + 'x' + height, 12, height - 12);
+  if ((window.p5inblender || {}).hud !== false) {
+    noStroke();
+    fill(40, 40, 46, 210);
+    textSize(11);
+    text('p5.riso  ·  frame ' + (st.frame || 0) +
+         '  ·  tracked ' + ((st.objects || []).length) +
+         '  ·  geo ' + ((st.geo || []).length) +
+         '  ·  ' + width + 'x' + height, 12, height - 12);
+  }
 }

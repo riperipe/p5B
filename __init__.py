@@ -29,7 +29,7 @@ from . import live_image, transport, window
 bl_info = {
     "name": "p5inBlender",
     "author": "DeepseekWorkzone",
-    "version": (0, 18, 0),
+    "version": (0, 20, 0),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > p5inBlender",
     "description": "Live 2D canvas as a UV-mapped texture, coded in Blender's text editor",
@@ -257,16 +257,18 @@ function sketch(p) {
       p.text(o.name, x + 22, y - 16);
     });
 
-    // 5) HUD
-    p.noStroke();
-    p.fill(200, 230, 255, 190);
-    p.textSize(11);
-    p.text('frame ' + (state.frame || 0) +
-           '   t=' + (D.t || 0).toFixed(2) + 's' +
-           '   tracked ' + objs.length +
-           '   geo ' + geo.length +
-           '   ' + p.width + 'x' + p.height +
-           (tex ? '   tex' : ''), 12, p.height - 12);
+    // 5) HUD（N 面板 Canvas → Show Live Info 控制，读 p5inblender.hud）
+    if (D.hud !== false) {
+      p.noStroke();
+      p.fill(200, 230, 255, 190);
+      p.textSize(11);
+      p.text('frame ' + (state.frame || 0) +
+             '   t=' + (D.t || 0).toFixed(2) + 's' +
+             '   tracked ' + objs.length +
+             '   geo ' + geo.length +
+             '   ' + p.width + 'x' + p.height +
+             (tex ? '   tex' : ''), 12, p.height - 12);
+    }
   };
 }
 """
@@ -363,6 +365,7 @@ def build_state(scene, plane=None, img_size=None) -> dict:
         "type": "state",
         "frame": scene.frame_current,
         "t": round(scene.frame_current / max(scene.render.fps, 1), 4),
+        "hud": bool(getattr(scene, "p5b_show_hud", True)),
         "canvas": ({"name": frame["name"], "w": round(frame["sx"], 4), "h": round(frame["sy"], 4)}
                    if frame else None),
         "objects": objects,
@@ -553,7 +556,7 @@ def _pump():
 
         # auto-run: push a sketch again once its text stops changing
         if rec is not None and getattr(scene, "p5b_auto_run", True):
-            if now - rt.get("ar_t", 0.0) >= 0.3:
+            if now - rt.get("ar_t", 0.0) >= 0.12:
                 rt["ar_t"] = now
                 text = bpy.data.texts.get(rec.text)
                 if text is not None:
@@ -1469,6 +1472,7 @@ class P5B_PT_canvas(bpy.types.Panel):
         row.operator("p5b.bind_plane", text="Bind Mesh", icon="LINKED")
         row.operator("p5b.reset_material", text="Reset Material", icon="FILE_REFRESH")
         layout.operator("p5b.standardize_plane", text="Standardize Canvas (2x2 on XY)", icon="MESH_GRID")
+        layout.prop(context.scene, "p5b_show_hud", text="Show Live Info")
         rec = active_record()
         if rec is not None:
             layout.prop_search(rec, "texture", bpy.data, "images", text="Texture")
@@ -1651,6 +1655,11 @@ def register():
         bpy.types.Scene.p5b_active = bpy.props.IntProperty(name="Active", default=0)
     if not hasattr(bpy.types.Scene, "p5b_auto_run"):
         bpy.types.Scene.p5b_auto_run = bpy.props.BoolProperty(name="Auto Run", default=True)
+    if not hasattr(bpy.types.Scene, "p5b_show_hud"):
+        bpy.types.Scene.p5b_show_hud = bpy.props.BoolProperty(
+            name="Show Live Info", default=True,
+            description="Show the live readout (fps/objects/state) in the canvas; "
+                        "sketches read it as p5inblender.hud")
     if _on_load_post not in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.append(_on_load_post)
     try:
@@ -1673,6 +1682,7 @@ def unregister():
             bpy.utils.unregister_class(cls)
         except RuntimeError:
             pass
-    for prop in ("p5b_port", "p5b_width", "p5b_height", "p5b_instances", "p5b_active", "p5b_auto_run"):
+    for prop in ("p5b_port", "p5b_width", "p5b_height", "p5b_instances", "p5b_active",
+                 "p5b_auto_run", "p5b_show_hud"):
         if hasattr(bpy.types.Scene, prop):
             delattr(bpy.types.Scene, prop)
