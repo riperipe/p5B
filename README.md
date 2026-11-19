@@ -226,6 +226,22 @@ sketch 顶部可以声明两件事：
 一步到位看到效果：选中一个空物体 → `Tracking` → `Track Selected`；
 选中一个网格 → `Tracking` → `Send Geometry`；然后 `Run`。
 
+## 语法高亮 / 用外部编辑器写
+
+Blender 的 Text Editor **只内置 Python 的着色规则**（`SpaceTextEditor` 里只有一个
+`show_syntax_highlight` 开关，没有语言选择）。所以 JS 代码在那里基本是纯白：
+`function`、`let`、`const` 都不在词表里，只有字符串/数字偶尔有点颜色。
+
+想要真正带 JS 高亮的编辑体验，用外部编辑器：
+
+**`Sketch` 面板 → `Edit Externally`**
+
+1. 把当前 sketch 存成磁盘文件（`//p5inblender_sketches/<名字>.js`；未保存的 .blend 落到临时目录）
+2. 用系统默认编辑器打开（装了 VS Code 就是 VS Code，带完整 JS 高亮）
+3. **保存文件即可**——插件每 0.3 秒看一次文件修改时间，变了就读回 Blender 并自动推给画布
+
+实测：在编辑器里追加两行 → 版本 1→2，Blender 里的文本同步更新，画布无中断刷新。
+
 ## 改代码：在哪改、改完怎么同步
 
 sketch 就是 Blender 里的一个 **Text datablock**（不是磁盘文件），三处入口都指向它：

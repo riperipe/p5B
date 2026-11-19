@@ -29,7 +29,7 @@ from . import live_image, transport, window
 bl_info = {
     "name": "p5inBlender",
     "author": "DeepseekWorkzone",
-    "version": (0, 13, 1),
+    "version": (0, 14, 0),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > p5inBlender",
     "description": "Live 2D canvas as a UV-mapped texture, coded in Blender's text editor",
@@ -417,6 +417,7 @@ def instance_push(rec) -> int:
         return 0
     text = bpy.data.texts.get(rec.text)
     if text is None:
+        _state["error"] = f"sketch text '{rec.text}' not found"
         return 0
     rt["sketch_version"] += 1
     if rt["server"] is not None:
@@ -505,6 +506,22 @@ def _pump():
                 rt["ar_t"] = now
                 text = bpy.data.texts.get(rec.text)
                 if text is not None:
+                    # 外部编辑器改了磁盘文件？读回来再推送
+                    if text.filepath:
+                        try:
+                            mtime = os.path.getmtime(bpy.path.abspath(text.filepath))
+                        except OSError:
+                            mtime = 0.0
+                        if mtime and mtime > rt.get("file_mtime", 0.0):
+                            rt["file_mtime"] = mtime
+                            try:
+                                with open(bpy.path.abspath(text.filepath), encoding="utf-8") as fh:
+                                    text.from_string(fh.read())
+                            except OSError:
+                                pass
+                            instance_push(rec)
+                            rt["src_hash"] = hash(text.as_string())
+                            continue
                     digest = hash(text.as_string())
                     if rt.get("src_hash") is None:
                         rt["src_hash"] = digest
@@ -752,6 +769,7 @@ class P5B_OT_new_sketch(bpy.types.Operator):
                 for area in win.screen.areas:
                     if area.type == "TEXT_EDITOR":
                         area.spaces.active.text = text
+                        area.spaces.active.show_syntax_highlight = True
                         shown = True
         if not shown:
             for wm in bpy.data.window_managers:
@@ -780,6 +798,50 @@ class P5B_OT_reset_sketch(bpy.types.Operator):
         text.from_string(TEMPLATE)
         instance_push(rec)
         self.report({"INFO"}, f"reset {rec.text}")
+        return {"FINISHED"}
+
+
+class P5B_OT_external_edit(bpy.types.Operator):
+    bl_idname = "p5b.external_edit"
+    bl_label = "Edit Externally"
+    bl_description = "Save the sketch to disk, open it in your OS editor (real JS highlighting), auto-sync on save"
+
+    def execute(self, context):
+        rec = active_record()
+        if rec is None:
+            self.report({"ERROR"}, "no instance")
+            return {"CANCELLED"}
+        text = bpy.data.texts.get(rec.text)
+        if text is None:
+            self.report({"ERROR"}, f"text '{rec.text}' not found")
+            return {"CANCELLED"}
+        if text.filepath:
+            path = bpy.path.abspath(text.filepath)
+        else:
+            base = bpy.path.abspath("//") if bpy.data.filepath else tempfile.gettempdir()
+            folder = os.path.join(base, "p5inblender_sketches")
+            os.makedirs(folder, exist_ok=True)
+            name = rec.text if rec.text.lower().endswith((".js", ".py", ".txt")) else rec.text + ".js"
+            path = os.path.join(folder, name)
+            text.filepath = path
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(text.as_string())
+        try:
+            _state["instances"].get(rec.name, {})["file_mtime"] = os.path.getmtime(path)
+        except OSError:
+            pass
+        try:
+            if sys.platform == "win32":
+                os.startfile(path)
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", path])
+            else:
+                subprocess.Popen(["xdg-open", path])
+        except OSError as exc:
+            self.report({"ERROR"}, f"could not open editor: {exc}")
+            return {"CANCELLED"}
+        self.report({"INFO"}, f"editing {path} — save the file to sync")
         return {"FINISHED"}
 
 
@@ -1275,6 +1337,9 @@ class P5B_PT_sketch(bpy.types.Panel):
         row.operator("p5b.new_sketch", text="Edit", icon="TEXT")
         if rec is not None:
             layout.prop_search(rec, "text", bpy.data, "texts", text="Sketch")
+            if bpy.data.texts.get(rec.text) is None:
+                layout.label(text=f"missing text: {rec.text}", icon="ERROR")
+        layout.operator("p5b.external_edit", icon="TEXT")
         layout.prop(context.scene, "p5b_auto_run", text="Auto Run on Edit")
         layout.operator("p5b.reset_sketch", icon="FILE_REFRESH")
         layout.label(text=f"v{st['sketch_version']} · {st['frames']} frames · {st['dropped']} dropped")
@@ -1368,6 +1433,7 @@ class P5B_PT_text_sidebar(bpy.types.Panel):
 classes = (
     P5B_Instance,
     P5B_OT_start, P5B_OT_stop, P5B_OT_new_sketch, P5B_OT_run_sketch, P5B_OT_reset_sketch,
+    P5B_OT_external_edit,
     P5B_OT_open_host, P5B_OT_close_host,
     P5B_OT_create_window, P5B_OT_show_canvas, P5B_OT_track, P5B_OT_untrack,
     P5B_OT_bind_plane, P5B_OT_feedback, P5B_OT_mark_geo, P5B_OT_unmark_geo,
