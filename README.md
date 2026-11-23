@@ -109,6 +109,11 @@ New canvases get a Principled material with:
   transparent in Blender),
 - a detached `P5B Color Ramp` you can wire in for duotone/palette looks.
 
+UVs are **the mesh's own**: the material reads Texture Coordinate → UV, i.e. the
+active UV map of whatever mesh it is bound to. No UV layer is created and existing
+ones are never renamed or overwritten. A mesh without any UV map still gets the
+material, but `Bind Mesh` warns — without UVs the canvas has nowhere to land.
+
 `Canvas → Reset Material` rebuilds it in place. Hand-edited materials are never
 overwritten automatically.
 

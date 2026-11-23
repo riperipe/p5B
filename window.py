@@ -20,7 +20,7 @@ from __future__ import annotations
 import bpy
 
 MAT_NAME = "P5B_Canvas"
-UV_NAME = "P5B_UV"
+UV_NAME = "UVMap"        # Blender 自带 UV 图层的默认名字（仅在必须新建时使用）
 RIG_VERSION = 2  # 结构版本：老材质会被自动升级
 
 
@@ -40,10 +40,18 @@ def create_window_plane(name: str = "P5B_Window", size: float = 2.0, location=(0
 
 
 def ensure_uv(obj) -> str:
-    me = obj.data
-    if not me.uv_layers:
-        me.uv_layers.new(name=UV_NAME)
-    return me.uv_layers.active.name
+    """返回物体已有的 UV 图层名（活动的那张）；不新建。
+
+    窗户材质直接吃模型自带的 UV：共享 UV、UV 编辑、多 UV 图层都按 Blender 的
+    活动图层走。返回空字符串表示这个网格没有 UV，此时 UVMap 节点留空，
+    Blender 会退回活动 UV（没有就采不到像素）。
+    """
+    me = getattr(obj, "data", None)
+    layers = getattr(me, "uv_layers", None)
+    if not layers:
+        return ""
+    active = layers.active
+    return active.name if active is not None else layers[0].name
 
 
 def _apply_blend_mode(mat) -> None:
@@ -131,9 +139,11 @@ def build_material(image, name: str = MAT_NAME, force: bool = False) -> bpy.type
     mapping.name = mapping.label = "P5B Mapping"
     mapping.location = (-680, 0)
 
-    uvn = nt.nodes.new("ShaderNodeUVMap")
-    uvn.name = uvn.label = "P5B UV"
-    uvn.location = (-920, 0)
+    # 自带 UV：Texture Coordinate 的 UV 输出直接取网格的活动 UV 图层，
+    # 不新建、不覆盖用户已有的 UV（多 UV 时跟随 Blender 的活动图层）
+    coord = nt.nodes.new("ShaderNodeTexCoord")
+    coord.name = coord.label = "P5B UV"
+    coord.location = (-920, 0)
 
     # 颜色：默认直通（ColorRamp 会把 RGB 变成灰度，别默认插在链路上）
     # 需要套色/色调映射时，把 Image.Color 拖到 P5B Color Ramp、再接到 Base Color
@@ -158,7 +168,7 @@ def build_material(image, name: str = MAT_NAME, force: bool = False) -> bpy.type
     ael[1].position = 1.0
     ael[1].color = (1.0, 1.0, 1.0, 1.0)
 
-    nt.links.new(uvn.outputs["UV"], mapping.inputs["Vector"])
+    nt.links.new(coord.outputs["UV"], mapping.inputs["Vector"])
     nt.links.new(mapping.outputs["Vector"], tex.inputs["Vector"])
     nt.links.new(tex.outputs["Color"], bsdf.inputs["Base Color"])
     if "Emission Color" in bsdf.inputs:
@@ -175,11 +185,10 @@ def build_material(image, name: str = MAT_NAME, force: bool = False) -> bpy.type
 
 
 def bind_window(obj, image, material_name: str = MAT_NAME):
-    uv = ensure_uv(obj)
     mat = build_material(image, material_name)
-    uvn = next((n for n in mat.node_tree.nodes if n.type == "UVMAP"), None)
-    if uvn is not None:
-        uvn.uv_map = uv
+    legacy = next((n for n in mat.node_tree.nodes if n.type == "UVMAP"), None)
+    if legacy is not None:
+        legacy.uv_map = ensure_uv(obj)
     if not obj.data.materials:
         obj.data.materials.append(mat)
     else:

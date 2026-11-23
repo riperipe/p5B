@@ -32,7 +32,7 @@ _t = _i18n.t
 bl_info = {
     "name": "p5B",
     "author": "DeepseekWorkzone",
-    "version": (0, 22, 4),
+    "version": (0, 22, 5),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > p5B",
     "description": "Live 2D canvas as a UV-mapped texture, coded in Blender's text editor",
@@ -1221,15 +1221,25 @@ class P5B_OT_bind_plane(bpy.types.Operator):
             self.report({"ERROR"}, "select a mesh object")
             return {"CANCELLED"}
         mat = window.build_material(rt["live"].image, rec.material or f"P5B_Canvas_{rec.name}")
+        no_uv = []
         for ob in targets:
             data = ob.data
-            if not data.uv_layers:
-                data.uv_layers.new(name=window.UV_NAME)
+            # 用网格自带的 UV，不新建图层；没有 UV 的网格照样给材质，但会提示
+            uv = window.ensure_uv(ob)
+            if not uv:
+                no_uv.append(ob.name)
+            uvn = next((n for n in mat.node_tree.nodes if n.type == "UVMAP"), None)
+            if uvn is not None:
+                uvn.uv_map = uv
             if not data.materials:
                 data.materials.append(mat)
             else:
                 data.materials[0] = mat
-        self.report({"INFO"}, f"bound {len(targets)} mesh(es) to {rec.name}")
+        if no_uv:
+            self.report({"WARNING"},
+                        f"{len(no_uv)} object(s) have no UV map: {', '.join(no_uv[:3])}"
+                        f"{' …' if len(no_uv) > 3 else ''} — the canvas needs UVs to be mapped")
+        self.report({"INFO"}, f"bound {len(targets)} mesh(es) to {rec.name} (existing UV maps)")
         return {"FINISHED"}
 
 

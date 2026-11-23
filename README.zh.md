@@ -166,3 +166,7 @@ python tools/check_release.py
 GPL-3.0-or-later —— 见 [LICENSE](LICENSE)。内置的两份 p5.js（1.11.3、2.4.0）是
 **LGPL-2.1**：声明与许可全文在 [`host/libs/LICENSE-p5.txt`](host/libs/LICENSE-p5.txt)，
 细节见 [THIRD-PARTY.md](THIRD-PARTY.md)。
+
+
+**UV 用模型自带的**：材质读 Texture Coordinate → UV，也就是绑定网格的活动 UV 图层。
+不新建 UV、不改名、不覆盖已有图层；网格完全没有 UV 时 `Bind Mesh` 会给出警告。
