@@ -32,7 +32,7 @@ _t = _i18n.t
 bl_info = {
     "name": "p5B",
     "author": "DeepseekWorkzone",
-    "version": (0, 22, 5),
+    "version": (0, 22, 6),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > p5B",
     "description": "Live 2D canvas as a UV-mapped texture, coded in Blender's text editor",
@@ -260,6 +260,27 @@ function sketch(p) {
       p.text(o.name, x + 22, y - 16);
     });
 
+    // 5) 距离：空对象离模型越近，反应越剧烈（state.links 由 Blender 算好）
+    (state.links || []).forEach(function (l) {
+      const FALLOFF = 4.0;                        // 衰减距离（米），自己改
+      const near = Math.max(0, 1 - l.dist / FALLOFF);
+      if (near <= 0) return;
+      const from = objs.find(function (o) { return o.name === l.from; });
+      if (!from) return;
+      const ex = from.x * p.width;
+      const ey = from.y * p.height;
+      if (l.visible) {
+        p.stroke(255, 120 + 100 * near, 70, 40 + 160 * near);
+        p.strokeWeight(1 + 2 * near);
+        p.line(ex, ey, l.x * p.width, l.y * p.height);
+      }
+      p.noFill();
+      p.stroke(255, 80 + 60 * near, 60, 60 + 170 * near);
+      p.strokeWeight(1.5 + 1.5 * near);
+      p.circle(ex, ey, 26 + 110 * near);
+      p.circle(ex, ey, 8 + 30 * near);
+    });
+
     // 5) HUD（N 面板 Canvas → Show Live Info 控制，读 p5inblender.hud）
     if (D.hud !== false) {
       p.noStroke();
@@ -268,6 +289,7 @@ function sketch(p) {
       p.text('frame ' + (state.frame || 0) +
              '   t=' + (D.t || 0).toFixed(2) + 's' +
              '   tracked ' + objs.length +
+             '   near ' + (state.links && state.links.length ? state.links[0].dist.toFixed(2) : '-') +
              '   geo ' + geo.length +
              '   ' + p.width + 'x' + p.height +
              (tex ? '   tex' : ''), 12, p.height - 12);
@@ -394,6 +416,65 @@ def live_size_of(rec):
     return (int(rt["live"].width) or 1, int(rt["live"].height) or 1)
 
 
+def _bbox_local(bounds):
+    """局部空间的包围盒 (min, max)。"""
+    xs = [c[0] for c in bounds]
+    ys = [c[1] for c in bounds]
+    zs = [c[2] for c in bounds]
+    return Vector((min(xs), min(ys), min(zs))), Vector((max(xs), max(ys), max(zs)))
+
+
+def _build_links(scene, frame) -> list:
+    """每个被跟踪的空对象 → 每个标了 p5b_geo 的网格的距离。
+
+    距离算的是**网格有向包围盒（OBB）上最近点**到空对象原点的距离：
+    把空对象变换到网格局部空间、夹到 bbox 内，再变换回世界空间。比"原点到原点"
+    有意义（物体多大都算得准），又比逐三角面求最近点便宜得多。
+    center 是到 bbox 中心的距离；x/y 是 bbox 中心在画布上的归一化位置，
+    方便 sketch 直接画"空对象—模型"的连线。
+    """
+    empties = [ob for ob in scene.objects if ob.get("p5b_track")]
+    meshes = [ob for ob in scene.objects if ob.type == "MESH" and ob.get("p5b_geo")]
+    if not empties or not meshes:
+        return []
+
+    out = []
+    for empty in empties:
+        p_world = empty.matrix_world.translation
+        for mesh in meshes:
+            mw = mesh.matrix_world
+            try:
+                inv = mw.inverted()
+            except ValueError:
+                continue
+            local = inv @ p_world
+            mn, mx = _bbox_local(mesh.bound_box)
+            clamped = Vector((
+                min(max(local.x, mn.x), mx.x),
+                min(max(local.y, mn.y), mx.y),
+                min(max(local.z, mn.z), mx.z),
+            ))
+            closest = mw @ clamped
+            center_world = mw @ ((mn + mx) * 0.5)
+            entry = {
+                "from": empty.name,
+                "to": mesh.name,
+                "dist": round(float((p_world - closest).length), 4),        # 到最近表面（OBB 上）
+                "center": round(float((p_world - center_world).length), 4),  # 到中心
+            }
+            if frame is not None:
+                # 有画布时顺带给模型中心在画布上的位置，便于画连线
+                cu, cv, cdepth = project_to_canvas(center_world, frame)
+                entry.update({
+                    "x": round(float(cu), 5),
+                    "y": round(float(cv), 5),
+                    "depth": round(float(cdepth), 4),
+                    "visible": bool(0.0 <= cu <= 1.0 and 0.0 <= cv <= 1.0),
+                })
+            out.append(entry)
+    return out
+
+
 def build_state(scene, plane=None, img_size=None) -> dict:
     """What the sketch gets to see: tracked objects in canvas space."""
     frame = canvas_frame(plane, img_size)
@@ -411,6 +492,9 @@ def build_state(scene, plane=None, img_size=None) -> dict:
                 "depth": round(float(height), 4),  # 高出画布多少（画布法线方向）
                 "visible": bool(0.0 <= u <= 1.0 and 0.0 <= v <= 1.0),
             })
+
+    # 空对象 ↔ 模型（标了 p5b_geo 的网格）的距离关系，一起喂给 sketch
+    links = _build_links(scene, frame)
     return {
         "type": "state",
         "frame": scene.frame_current,
@@ -419,6 +503,7 @@ def build_state(scene, plane=None, img_size=None) -> dict:
         "canvas": ({"name": frame["name"], "w": round(frame["sx"], 4), "h": round(frame["sy"], 4)}
                    if frame else None),
         "objects": objects,
+        "links": links,
     }
 
 
@@ -1582,6 +1667,9 @@ class P5B_PT_canvas(bpy.types.Panel):
         row = layout.row(align=True)
         row.operator("p5b.bind_plane", text="Bind Mesh", icon=_icon("LINKED"))
         row.operator("p5b.reset_material", text="Reset Material", icon=_icon("FILE_REFRESH"))
+        if rec is not None and rec.plane and bpy.data.objects.get(rec.plane) is None:
+            layout.label(text=_t("画布对象丢失：{name}", name=rec.plane), icon=_icon("ERROR"))
+            layout.label(text=_t("点 Window Plane 重新建一块"))
         layout.operator("p5b.standardize_plane", text="Standardize Canvas (2x2 on XY)", icon=_icon("MESH_GRID"))
         layout.prop(context.scene, "p5b_show_hud", text=_t("实时信息"))
         rec = active_record()

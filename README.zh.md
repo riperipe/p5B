@@ -170,3 +170,23 @@ GPL-3.0-or-later —— 见 [LICENSE](LICENSE)。内置的两份 p5.js（1.11.3�
 
 **UV 用模型自带的**：材质读 Texture Coordinate → UV，也就是绑定网格的活动 UV 图层。
 不新建 UV、不改名、不覆盖已有图层；网格完全没有 UV 时 `Bind Mesh` 会给出警告。
+
+### 空对象到模型的距离（`state.links`）
+
+跟踪一个空对象、再把网格 `Send Geometry`，Blender 会同时把「空对象 ↔ 模型」的距离送过来，
+sketch 就能按远近做反应（越近越剧烈）：
+
+```js
+p.draw = function () {
+  const links = p.p5inblender.state.links || [];
+  links.forEach((l) => {
+    const near = Math.max(0, 1 - l.dist / 4.0);   // 0..1，4 米内线性衰减
+    p.circle(l.x * p.width, l.y * p.height, 10 + 60 * near);
+  });
+};
+```
+
+字段：`from`/`to`（空对象/网格名）、`dist`（到网格**有向包围盒**的最近距离，空对象在盒子里时为 0）、
+`center`（到包围盒中心的距离）、`x`/`y`/`depth`/`visible`（该中心在画布上的位置，和 `objects` 同一套坐标）。
+
+内置 demo 就是用它在空对象周围画光环，改模板里的 `FALLOFF` 可以调衰减距离。

@@ -36,6 +36,8 @@ EN = {
     "重置为示例": "Reset Demo",
 
     # 提示 / 报错
+    "画布对象丢失：{name}": "Canvas object missing: {name}",
+    "点 Window Plane 重新建一块": "Press Window Plane to create one",
     "没有实例": "No instance",
     "请先启动实例": "Start the instance first",
     "实例 {name} 的画布图像不存在（{image}）": "Instance {name} has no canvas image ({image})",

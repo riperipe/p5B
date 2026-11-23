@@ -100,6 +100,33 @@ visible = u, v ∈ [0, 1]      depth = height above the canvas (along its normal
 The sketch image is letterboxed inside the square (uniform scale, never stretched),
 so `u, v` are coordinates **inside the image**, not inside the square.
 
+## Distance to models (`state.links`)
+
+Track an empty and mark a mesh with `Send Geometry`, and Blender also measures how far
+the empty is from that mesh — so a sketch can react to proximity (closer = stronger):
+
+```js
+p.draw = function () {
+  const links = p.p5inblender.state.links || [];
+  links.forEach((l) => {
+    const near = Math.max(0, 1 - l.dist / 4.0);   // 0..1, 4 m falloff
+    p.circle(l.x * p.width, l.y * p.height, 10 + 60 * near);
+  });
+};
+```
+
+Each entry is:
+
+| field | meaning |
+|---|---|
+| `from` / `to` | empty name / mesh name |
+| `dist` | closest distance from the empty to the mesh's **oriented bounding box** |
+| `center` | distance to the bounding-box centre |
+| `x`, `y`, `depth`, `visible` | where that centre lands on the canvas (same space as `objects`) |
+
+`dist` is 0 when the empty is inside the mesh's bounds. The baked-in demo draws these
+rings around a tracked empty; change `FALLOFF` in the template to taste.
+
 ## Material
 
 New canvases get a Principled material with:
